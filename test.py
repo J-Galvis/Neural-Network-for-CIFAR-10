@@ -1,1 +1,1 @@
-lola
+print("Hello, World!")
