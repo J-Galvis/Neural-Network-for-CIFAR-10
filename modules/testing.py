@@ -26,6 +26,6 @@ if __name__ == "__main__":
     
     # Code to initialize testloader and net
     net = Net()
-    net.load_state_dict(torch.load('./cifar10_trained_model.pth'))
+    net.load_state_dict(torch.load('./Results/cifar10_trained_model.pth'))
 
     testingNetwork(testloader, net)
