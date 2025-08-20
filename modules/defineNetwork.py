@@ -14,7 +14,7 @@ transform = transforms.Compose(
 
 trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
                                         
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=4, shuffle=True, num_workers=2)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=2)
 
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
@@ -23,23 +23,50 @@ class Net(nn.Module):
 
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        
+        # First convolutional block
+        self.conv1 = nn.Conv2d(3, 6, 5)      # 3 -> 6 channels, 5x5 kernel
+        self.pool1 = nn.MaxPool2d(2, 2)      # 2x2 pooling
+        
+        # Second convolutional block  
+        self.conv2 = nn.Conv2d(6, 16, 5)     # 6 -> 16 channels, 5x5 kernel
+        self.pool2 = nn.MaxPool2d(2, 2)      # 2x2 pooling
+        
+        # Third convolutional block
+        self.conv3 = nn.Conv2d(16, 32, 3)    # 16 -> 32 channels, 3x3 kernel
+        # No pooling here to preserve some spatial information
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(32 * 3 * 3, 120)  # Adjusted for new conv layer output
         self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)
+        self.fc3 = nn.Linear(84, 10)           # 10 classes for CIFAR-10
 
+        # Dropout for regularization
+        self.dropout = nn.Dropout(0.5)
+    
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 16 * 5 * 5)
+        # First conv block: 32x32x3 -> 28x28x6 -> 14x14x6
+        x = self.pool1(F.relu(self.conv1(x)))
+        
+        # Second conv block: 14x14x6 -> 10x10x16 -> 5x5x16  
+        x = self.pool2(F.relu(self.conv2(x)))
+        
+        # Third conv block: 5x5x16 -> 3x3x32
+        x = F.relu(self.conv3(x))
+        
+        # Flatten for fully connected layers
+        x = x.view(-1, 32 * 3 * 3)  # 288 features
+        
+        # Fully connected layers with dropout
         x = F.relu(self.fc1(x))
+        x = self.dropout(x)  # Apply dropout only during training
         x = F.relu(self.fc2(x))
+        x = self.dropout(x)  # Apply dropout only during training
         x = self.fc3(x)
+        
         return x
 
-if __name__ == "__main__":
+def trainNet(i: int):
     net = Net()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
@@ -50,7 +77,7 @@ if __name__ == "__main__":
     # List to store epoch times
     epoch_times = []
     
-    for epoch in range(10):  
+    for epoch in range(i):  
         epoch_start_time = time.time()
         running_loss = 0.0
         
@@ -101,3 +128,7 @@ if __name__ == "__main__":
     print('Times saved to epoch_times.csv and total_training_time.csv')
     
     torch.save(net.state_dict(), './Results/cifar10_trained_model.pth') #This saves the trained model
+    
+
+if __name__ == "__main__":
+    trainNet(10)
