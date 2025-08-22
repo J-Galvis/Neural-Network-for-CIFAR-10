@@ -61,19 +61,16 @@ class Net(nn.Module):
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
         x = self.pool1(x)
-        x = self.dropout(x)
         
         # Second conv block
         x = F.relu(self.bn3(self.conv3(x)))
         x = F.relu(self.bn4(self.conv4(x)))
         x = self.pool2(x)
-        x = self.dropout(x)
         
         # Third conv block
         x = F.relu(self.bn5(self.conv5(x)))
         x = F.relu(self.bn6(self.conv6(x)))
         x = self.pool3(x)
-        x = self.dropout(x)
         
         # Global average pooling
         x = self.global_avg_pool(x)
@@ -97,7 +94,7 @@ def trainNet(num_epochs: int):
     optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
     
     # IMPROVEMENT 2: Learning rate scheduler for better convergence
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
     
     print("Starting training...")
     total_start_time = time.time()
@@ -164,4 +161,4 @@ def trainNet(num_epochs: int):
 
 
 if __name__ == "__main__":
-    trainNet(1)
+    trainNet(10)
