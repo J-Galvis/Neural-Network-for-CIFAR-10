@@ -161,4 +161,4 @@ def trainNet(num_epochs: int):
 
 
 if __name__ == "__main__":
-    trainNet(10)
+    trainNet(25)
