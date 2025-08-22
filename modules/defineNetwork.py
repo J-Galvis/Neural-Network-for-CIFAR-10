@@ -25,48 +25,68 @@ class Net(nn.Module):
         super(Net, self).__init__()
         
         # First convolutional block
-        self.conv1 = nn.Conv2d(3, 6, 5)      # 3 -> 6 channels, 5x5 kernel
-        self.pool1 = nn.MaxPool2d(2, 2)      # 2x2 pooling
+        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)    # 32x32x3 -> 32x32x32
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 32, 3, padding=1)   # 32x32x32 -> 32x32x32
+        self.bn2 = nn.BatchNorm2d(32)
+        self.pool1 = nn.MaxPool2d(2, 2)                # 32x32x32 -> 16x16x32
         
-        # Second convolutional block  
-        self.conv2 = nn.Conv2d(6, 16, 5)     # 6 -> 16 channels, 5x5 kernel
-        self.pool2 = nn.MaxPool2d(2, 2)      # 2x2 pooling
+        # Second convolutional block
+        self.conv3 = nn.Conv2d(32, 64, 3, padding=1)   # 16x16x32 -> 16x16x64
+        self.bn3 = nn.BatchNorm2d(64)
+        self.conv4 = nn.Conv2d(64, 64, 3, padding=1)   # 16x16x64 -> 16x16x64
+        self.bn4 = nn.BatchNorm2d(64)
+        self.pool2 = nn.MaxPool2d(2, 2)                # 16x16x64 -> 8x8x64
         
         # Third convolutional block
-        self.conv3 = nn.Conv2d(16, 32, 3)    # 16 -> 32 channels, 3x3 kernel
-        # No pooling here to preserve some spatial information
+        self.conv5 = nn.Conv2d(64, 128, 3, padding=1)  # 8x8x64 -> 8x8x128
+        self.bn5 = nn.BatchNorm2d(128)
+        self.conv6 = nn.Conv2d(128, 128, 3, padding=1) # 8x8x128 -> 8x8x128
+        self.bn6 = nn.BatchNorm2d(128)
+        self.pool3 = nn.MaxPool2d(2, 2)                # 8x8x128 -> 4x4x128
         
-        # Fully connected layers
-        self.fc1 = nn.Linear(32 * 3 * 3, 120)  # Adjusted for new conv layer output
-        self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 10)           # 10 classes for CIFAR-10
+        # Global Average Pooling instead of large FC layer
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1) # 4x4x128 -> 1x1x128
+        
+        # Smaller fully connected layers
+        self.fc1 = nn.Linear(128, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 10)
 
         # Dropout for regularization
         self.dropout = nn.Dropout(0.5)
     
     def forward(self, x):
-        # First conv block: 32x32x3 -> 28x28x6 -> 14x14x6
-        x = self.pool1(F.relu(self.conv1(x)))
+        # First conv block with residual-like connection
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = self.pool1(x)
+        x = self.dropout(x)
         
-        # Second conv block: 14x14x6 -> 10x10x16 -> 5x5x16  
-        x = self.pool2(F.relu(self.conv2(x)))
+        # Second conv block
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.relu(self.bn4(self.conv4(x)))
+        x = self.pool2(x)
+        x = self.dropout(x)
         
-        # Third conv block: 5x5x16 -> 3x3x32
-        x = F.relu(self.conv3(x))
+        # Third conv block
+        x = F.relu(self.bn5(self.conv5(x)))
+        x = F.relu(self.bn6(self.conv6(x)))
+        x = self.pool3(x)
+        x = self.dropout(x)
         
-        # Flatten for fully connected layers
-        x = x.view(-1, 32 * 3 * 3)  # 288 features
+        # Global average pooling
+        x = self.global_avg_pool(x)
+        x = x.view(x.size(0), -1)  # Flatten: batch_size x 128
         
-        # Fully connected layers with dropout
+        # Fully connected layers
         x = F.relu(self.fc1(x))
-        x = self.dropout(x)  # Apply dropout only during training
-        x = F.relu(self.fc2(x))
-        x = self.dropout(x)  # Apply dropout only during training
-        x = self.fc3(x)
+        x = self.dropout(x)
+        x = self.fc2(x)
         
         return x
 
-def trainNet(i: int):
+def trainNet(j: int): ## Este training net ta re malo, deberia implementar los metodos explicitos en Net
     net = Net()
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
@@ -77,7 +97,7 @@ def trainNet(i: int):
     # List to store epoch times
     epoch_times = []
     
-    for epoch in range(i):  
+    for epoch in range(j):  
         epoch_start_time = time.time()
         running_loss = 0.0
         
@@ -131,4 +151,4 @@ def trainNet(i: int):
     
 
 if __name__ == "__main__":
-    trainNet(10)
+    trainNet(20)
