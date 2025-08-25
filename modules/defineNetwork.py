@@ -8,13 +8,18 @@ import time
 import csv
 import os
 
+
+num_workers = os.cpu_count()  # Gets number of CPU cores
+
+torch.set_num_threads(num_workers)
+
 transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
 trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-                                        
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=2)
+
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
 
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
@@ -89,13 +94,27 @@ def trainNet(num_epochs: int):
 
     net = Net()
     criterion = nn.CrossEntropyLoss()
+
+    # IMPROVEMENT 1: Better optimizer with optimized parameters
+    optimizer = optim.AdamW(net.parameters(), lr=0.001, weight_decay=1e-2, 
+                           betas=(0.9, 0.999), eps=1e-8)
     
-    # IMPROVEMENT 1: Better learning rate and weight decay
-    optimizer = optim.SGD(net.parameters(), lr=0.01, momentum=0.9, weight_decay=1e-4)
-    
-    # IMPROVEMENT 2: Learning rate scheduler for better convergence
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
-    
+    # IMPROVEMENT 2: More aggressive learning rate scheduling
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=0.01,
+        epochs=num_epochs,
+        steps_per_epoch=len(trainloader),
+        pct_start=0.3,
+        div_factor=10,
+        final_div_factor=100
+    )
+
+    # IMPROVEMENT 3: Mixed precision training for faster computation
+    scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     print("Starting training...")
     total_start_time = time.time()
     
@@ -104,28 +123,53 @@ def trainNet(num_epochs: int):
     
     for epoch in range(num_epochs):  
         epoch_start_time = time.time()
-        running_loss = 0.0
-        
-        # IMPROVEMENT 3: Track training accuracy
-        correct_train = 0
-        total_train = 0
-        
-        # Set model to training mode
         net.train()
         
-        for batch_idx, data in enumerate(trainloader, 0):
-            inputs, labels = data
-            optimizer.zero_grad()
-            outputs = net(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
+        # IMPROVEMENT 6: Gradient accumulation for effective larger batch size
+        accumulation_steps = 4
+        optimizer.zero_grad()
+        
+        for batch_idx, (inputs, labels) in enumerate(trainloader):
+            inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
             
-            # IMPROVEMENT 4: Calculate training accuracy
-            _, predicted = torch.max(outputs.data, 1)
-            total_train += labels.size(0)
-            correct_train += (predicted == labels).sum().item()
+            # IMPROVEMENT 7: Use automatic mixed precision if available
+            if scaler is not None:
+                with torch.cuda.amp.autocast():
+                    outputs = net(inputs)
+                    loss = criterion(outputs, labels)
+                    loss = loss / accumulation_steps  # Scale loss for gradient accumulation
+                
+                scaler.scale(loss).backward()
+                
+                if (batch_idx + 1) % accumulation_steps == 0:
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+                    scheduler.step()
+            else:
+                # CPU training path
+                outputs = net(inputs)
+                loss = criterion(outputs, labels)
+                loss = loss / accumulation_steps
+                
+                loss.backward()
+                
+                if (batch_idx + 1) % accumulation_steps == 0:
+                    # IMPROVEMENT 8: Gradient clipping for stability
+                    torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    optimizer.zero_grad()
+                    scheduler.step()
+        
+        # Handle remaining gradients if batch doesn't divide evenly
+        if len(trainloader) % accumulation_steps != 0:
+            if scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
+                optimizer.step()
+            optimizer.zero_grad()
         
         epoch_end_time = time.time()
         epoch_duration = epoch_end_time - epoch_start_time
