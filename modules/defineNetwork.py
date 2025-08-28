@@ -21,7 +21,6 @@ trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=
 
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
 
-
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 class Net(nn.Module):
@@ -30,18 +29,18 @@ class Net(nn.Module):
         super(Net, self).__init__()
         
         # First convolutional block
-        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)    # 32x32x3 -> 32x32x32
+        self.conv1 = nn.Conv2d(3 , 32, 3, padding=1)    
         self.bn1 = nn.BatchNorm2d(32)
-        self.conv2 = nn.Conv2d(32, 32, 3, padding=1)   # 32x32x32 -> 32x32x32
+        self.conv2 = nn.Conv2d(32, 32, 3, padding=1)   
         self.bn2 = nn.BatchNorm2d(32)
-        self.pool1 = nn.MaxPool2d(2, 2)                # 32x32x32 -> 16x16x32
+        self.pool1 = nn.MaxPool2d(2, 2)                
         
         # Second convolutional block
-        self.conv3 = nn.Conv2d(32, 64, 3, padding=1)   # 16x16x32 -> 16x16x64
+        self.conv3 = nn.Conv2d(32, 64, 3, padding=1)   
         self.bn3 = nn.BatchNorm2d(64)
-        self.conv4 = nn.Conv2d(64, 64, 3, padding=1)   # 16x16x64 -> 16x16x64
+        self.conv4 = nn.Conv2d(64, 64, 3, padding=1)  
         self.bn4 = nn.BatchNorm2d(64)
-        self.pool2 = nn.MaxPool2d(2, 2)                # 16x16x64 -> 8x8x64
+        self.pool2 = nn.MaxPool2d(2, 2)
         
         # Third convolutional block
         self.conv5 = nn.Conv2d(64, 128, 3, padding=1)  # 8x8x64 -> 8x8x128
