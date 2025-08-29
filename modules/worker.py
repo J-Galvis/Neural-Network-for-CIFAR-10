@@ -18,16 +18,42 @@ print("Connected to server")
 
 def receive_data(sock):
     """Receive data with length prefix"""
-    data_len = int.from_bytes(sock.recv(4), 'big')
-    data = b''
-    while len(data) < data_len:
-        data += sock.recv(data_len - len(data))
-    return data
+    try:
+        # Receive length prefix with timeout
+        sock.settimeout(30.0)  # 30 second timeout
+        length_bytes = b''
+        while len(length_bytes) < 4:
+            chunk = sock.recv(4 - len(length_bytes))
+            if not chunk:
+                raise ConnectionError("Connection closed while receiving length")
+            length_bytes += chunk
+        
+        data_len = int.from_bytes(length_bytes, 'big')
+        
+        # Receive actual data
+        data = b''
+        while len(data) < data_len:
+            chunk = sock.recv(min(data_len - len(data), 4096))
+            if not chunk:
+                raise ConnectionError("Connection closed while receiving data")
+            data += chunk
+        
+        sock.settimeout(None)  # Remove timeout
+        return data
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as e:
+        print(f"Connection error while receiving data: {e}")
+        sock.settimeout(None)
+        return None
 
 def send_gradients(sock, gradients):
     """Send gradients to server"""
-    grad_data = pickle.dumps(gradients)
-    sock.sendall(len(grad_data).to_bytes(4, 'big') + grad_data)
+    try:
+        grad_data = pickle.dumps(gradients)
+        sock.sendall(len(grad_data).to_bytes(4, 'big') + grad_data)
+        return True
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as e:
+        print(f"Connection error while sending gradients: {e}")
+        return False
 
 def update_model_params(model, params_dict):
     """Update model parameters from server"""
@@ -39,13 +65,22 @@ def update_model_params(model, params_dict):
 try:
     # Receive initial model parameters
     params_data = receive_data(client_socket)
+    if params_data is None:
+        print("Failed to receive initial parameters")
+        exit(1)
+    
     initial_params = pickle.loads(params_data)
     update_model_params(net, initial_params)
     print("Received initial model parameters")
 
+    batch_count = 0
     while True:
         # Receive batch or termination signal
         data = receive_data(client_socket)
+        
+        if data is None:
+            print("Connection lost, terminating worker")
+            break
         
         # Check for termination signal
         if data == b'DONE':
@@ -67,15 +102,27 @@ try:
             grads = [param.grad.cpu().numpy() for param in net.parameters() if param.grad is not None]
             
             # Send gradients back to server
-            send_gradients(client_socket, grads)
+            if not send_gradients(client_socket, grads):
+                print("Failed to send gradients, terminating")
+                break
             
             # Receive updated model parameters
             params_data = receive_data(client_socket)
+            if params_data is None:
+                print("Failed to receive updated parameters, terminating")
+                break
+                
             if params_data != b'DONE':
-                updated_params = pickle.loads(params_data)
-                update_model_params(net, updated_params)
+                try:
+                    updated_params = pickle.loads(params_data)
+                    update_model_params(net, updated_params)
+                except Exception as e:
+                    print(f"Error updating model parameters: {e}")
+                    break
             
-            print(f"Processed batch, loss: {loss.item():.4f}")
+            batch_count += 1
+            if batch_count % 10 == 0:  # Print every 10 batches to reduce output
+                print(f"Processed {batch_count} batches, last loss: {loss.item():.4f}")
             
         except Exception as e:
             print(f"Error processing batch: {e}")
@@ -84,5 +131,8 @@ try:
 except Exception as e:
     print(f"Worker error: {e}")
 finally:
-    client_socket.close()
+    try:
+        client_socket.close()
+    except:
+        pass
     print("Worker disconnected")

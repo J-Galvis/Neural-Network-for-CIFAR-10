@@ -9,9 +9,12 @@ import csv
 import os
 
 
-num_workers = os.cpu_count()  # Gets number of CPU cores
+import os
+import platform
 
-torch.set_num_threads(num_workers)
+num_workers = 0 if platform.system() == 'Windows' else os.cpu_count()  # Fix Windows multiprocessing issue
+
+torch.set_num_threads(num_workers if num_workers > 0 else 1)
 
 transform = transforms.Compose(
     [transforms.ToTensor(),
@@ -19,7 +22,7 @@ transform = transforms.Compose(
 
 trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
 
 classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
