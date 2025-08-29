@@ -90,7 +90,18 @@ try:
         # Process batch
         try:
             batch = pickle.loads(data)
-            inputs, labels = batch
+            
+            # Debug: Check what we received
+            if isinstance(batch, bytes) and batch == b'DONE':
+                print("Received DONE signal as batch data")
+                break
+            elif not (isinstance(batch, (tuple, list)) and len(batch) == 2):
+                print(f"Unexpected batch format: {type(batch)}, length: {len(batch) if hasattr(batch, '__len__') else 'N/A'}")
+                print(f"Batch content: {batch}")
+                continue
+            
+            # Handle both tuple and list formats
+            inputs, labels = batch[0], batch[1]
             
             # Forward pass and compute gradients
             net.zero_grad()
@@ -126,6 +137,8 @@ try:
             
         except Exception as e:
             print(f"Error processing batch: {e}")
+            print(f"Batch data type: {type(batch) if 'batch' in locals() else 'undefined'}")
+            print(f"Raw data length: {len(data) if data else 'None'}")
             break
 
 except Exception as e:

@@ -88,31 +88,31 @@ if __name__ == '__main__':
     print(f"Training with {len(active_workers)} active workers")
 
     # Training loop
-    for epoch in range(2):  # Training for 2 epochs
+    for epoch in range(5):  # Training for 2 epochs
         print(f'Epoch {epoch+1}')
         batch_idx = 0
         
+        # Reset batch_idx for each epoch
         while batch_idx < len(batches):
             batch_gradients = []
             batches_sent = 0
             workers_to_remove = []
             
-            # Send batches to active workers
-            for i, ws in enumerate(active_workers):
-                if batch_idx >= len(batches):
-                    # Send termination signal for this round
-                    if not send_batch(ws, b'DONE'):
+            # Send batches to active workers, but only send as many batches as we have workers
+            num_batches_to_send = min(len(active_workers), len(batches) - batch_idx)
+            
+            for i in range(num_batches_to_send):
+                if i < len(active_workers):
+                    ws = active_workers[i]
+                    batch = batches[batch_idx]
+                    
+                    if send_batch(ws, batch):
+                        batch_idx += 1
+                        batches_sent += 1
+                    else:
+                        print(f"Worker {i+1} disconnected, removing from active workers")
                         workers_to_remove.append(i)
-                    break
-                
-                batch = batches[batch_idx]
-                if send_batch(ws, batch):
-                    batch_idx += 1
-                    batches_sent += 1
-                else:
-                    print(f"Worker {i+1} disconnected, removing from active workers")
-                    workers_to_remove.append(i)
-                    ws.close()
+                        ws.close()
             
             # Remove disconnected workers
             for i in reversed(workers_to_remove):
@@ -122,11 +122,11 @@ if __name__ == '__main__':
                 print("All workers disconnected. Stopping training...")
                 break
             
-            # Receive and aggregate gradients from remaining workers
+            # Only try to receive gradients for the batches we actually sent
             successful_gradients = []
             workers_to_remove = []
             
-            for i in range(min(batches_sent, len(active_workers))):
+            for i in range(batches_sent):
                 if i < len(active_workers):
                     worker_grads = receive_gradients(active_workers[i])
                     if worker_grads is not None:
@@ -178,6 +178,8 @@ if __name__ == '__main__':
         except:
             pass
         ws.close()
+    
+    torch.save(net.state_dict(), './Results/cifar10_trained_model.pth') #This saves the trained model
 
     server_socket.close()
     print("Server stopped")
