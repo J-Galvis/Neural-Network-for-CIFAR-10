@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from defineNetwork import Net
 
-HOST = 'localhost'
+HOST = '192.168.60.56'
 PORT = 6000
 
 # Initialize model (parameters will be synced from server)

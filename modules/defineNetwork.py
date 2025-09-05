@@ -12,7 +12,7 @@ import os
 import os
 import platform
 
-num_workers = 0 if platform.system() == 'Windows' else os.cpu_count()  # Fix Windows multiprocessing issue
+num_workers = 0 if platform.system() == 'Windows' else os.cpu_count()  # Fix Windows multiprocessing shit 
 
 torch.set_num_threads(num_workers if num_workers > 0 else 1)
 
@@ -97,11 +97,9 @@ def trainNet(num_epochs: int):
     net = Net()
     criterion = nn.CrossEntropyLoss()
 
-    # IMPROVEMENT 1: Better optimizer with optimized parameters
     optimizer = optim.AdamW(net.parameters(), lr=0.001, weight_decay=1e-2, 
                            betas=(0.9, 0.999), eps=1e-8)
     
-    # IMPROVEMENT 2: More aggressive learning rate scheduling
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
         max_lr=0.01,
@@ -112,7 +110,6 @@ def trainNet(num_epochs: int):
         final_div_factor=100
     )
 
-    # IMPROVEMENT 3: Mixed precision training for faster computation
     scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -120,26 +117,23 @@ def trainNet(num_epochs: int):
     print("Starting training...")
     total_start_time = time.time()
     
-    # List to store epoch times and metrics
     epoch_times = []
     
     for epoch in range(num_epochs):  
         epoch_start_time = time.time()
         net.train()
-        
-        # IMPROVEMENT 6: Gradient accumulation for effective larger batch size
+
         accumulation_steps = 4
         optimizer.zero_grad()
         
         for batch_idx, (inputs, labels) in enumerate(trainloader):
             inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
             
-            # IMPROVEMENT 7: Use automatic mixed precision if available
             if scaler is not None:
                 with torch.cuda.amp.autocast():
                     outputs = net(inputs)
                     loss = criterion(outputs, labels)
-                    loss = loss / accumulation_steps  # Scale loss for gradient accumulation
+                    loss = loss / accumulation_steps 
                 
                 scaler.scale(loss).backward()
                 
@@ -149,7 +143,6 @@ def trainNet(num_epochs: int):
                     optimizer.zero_grad()
                     scheduler.step()
             else:
-                # CPU training path
                 outputs = net(inputs)
                 loss = criterion(outputs, labels)
                 loss = loss / accumulation_steps
@@ -157,13 +150,11 @@ def trainNet(num_epochs: int):
                 loss.backward()
                 
                 if (batch_idx + 1) % accumulation_steps == 0:
-                    # IMPROVEMENT 8: Gradient clipping for stability
                     torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
                     optimizer.step()
                     optimizer.zero_grad()
                     scheduler.step()
-        
-        # Handle remaining gradients if batch doesn't divide evenly
+
         if len(trainloader) % accumulation_steps != 0:
             if scaler is not None:
                 scaler.step(optimizer)
@@ -184,20 +175,17 @@ def trainNet(num_epochs: int):
     print(f'Total training time: {total_duration:.2f} seconds')
     print('Finished Training')
    
-    # Save epoch times to CSV
     with open('./Results/epoch_times.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Epoch', 'Time (seconds)'])  # Header
         for i, epoch_time in enumerate(epoch_times):
             writer.writerow([i + 1, round(epoch_time, 2)])
     
-    # Save total training time to CSV (append mode)
     total_training_file = './Results/total_training_time.csv'
     file_exists = os.path.exists(total_training_file)
    
     with open(total_training_file, 'a', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        # Write header only if file doesn't exist
         if not file_exists:
             writer.writerow(['Number of Epochs', 'Total Training Time (seconds)'])
         writer.writerow([len(epoch_times), round(total_duration, 2)])

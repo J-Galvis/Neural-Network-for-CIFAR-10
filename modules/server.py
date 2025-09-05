@@ -5,7 +5,7 @@ import torch.nn as nn
 from defineNetwork import Net
 
 if __name__ == '__main__':
-    HOST = 'localhost'
+    HOST = '10.180.208.105'
     PORT = 6000
 
     # Initialize model and optimizer
