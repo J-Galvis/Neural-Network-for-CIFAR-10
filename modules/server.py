@@ -1,7 +1,10 @@
 import socket
 import pickle
 import torch
+import time
 import torch.nn as nn
+import csv
+import os
 from defineNetwork import Net
 
 if __name__ == '__main__':
@@ -12,6 +15,23 @@ if __name__ == '__main__':
     net = Net()
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+
+    # Initialize CSV files for time tracking
+    results_dir = './Results'
+    os.makedirs(results_dir, exist_ok=True)
+    
+    workers_time_file = os.path.join(results_dir, 'Workers time.csv')
+    server_time_file = os.path.join(results_dir, 'Server time.csv')
+    
+    # Initialize Workers time CSV
+    with open(workers_time_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'Worker_ID', 'Batch_Processing_Time', 'Total_Worker_Time_Per_Epoch'])
+    
+    # Initialize Server time CSV
+    with open(server_time_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
 
     # Import trainloader inside main block to avoid Windows multiprocessing issues
     from defineNetwork import trainloader
@@ -88,7 +108,10 @@ if __name__ == '__main__':
     print(f"Training with {len(active_workers)} active workers")
 
     # Training loop
-    for epoch in range(5):  # Training for 2 epochs
+    for epoch in range(5):  # Training for 5 epochs
+        epoch_start_time = time.time()
+        worker_times = {}  # Track time for each worker in this epoch
+        
         print(f'Epoch {epoch+1}')
         batch_idx = 0
         
@@ -97,6 +120,7 @@ if __name__ == '__main__':
             batch_gradients = []
             batches_sent = 0
             workers_to_remove = []
+            batch_start_times = {}  # Track when each worker starts processing a batch
             
             # Send batches to active workers, but only send as many batches as we have workers
             num_batches_to_send = min(len(active_workers), len(batches) - batch_idx)
@@ -106,6 +130,7 @@ if __name__ == '__main__':
                     ws = active_workers[i]
                     batch = batches[batch_idx]
                     
+                    batch_start_times[i] = time.time()  # Record when batch is sent
                     if send_batch(ws, batch):
                         batch_idx += 1
                         batches_sent += 1
@@ -130,6 +155,20 @@ if __name__ == '__main__':
                 if i < len(active_workers):
                     worker_grads = receive_gradients(active_workers[i])
                     if worker_grads is not None:
+                        # Calculate batch processing time for this worker
+                        batch_end_time = time.time()
+                        batch_processing_time = batch_end_time - batch_start_times[i]
+                        
+                        # Track worker time for this epoch
+                        if i not in worker_times:
+                            worker_times[i] = 0
+                        worker_times[i] += batch_processing_time
+                        
+                        # Log individual batch processing time
+                        with open(workers_time_file, 'a', newline='') as f:
+                            writer = csv.writer(f)
+                            writer.writerow([epoch+1, i+1, f"{batch_processing_time:.4f}", ""])
+                        
                         successful_gradients.append(worker_grads)
                     else:
                         print(f"Failed to receive gradients from worker {i+1}")
@@ -164,11 +203,26 @@ if __name__ == '__main__':
                 for i in reversed(workers_to_remove):
                     active_workers.pop(i)
         
+        # Calculate total epoch time
+        epoch_end_time = time.time()
+        total_epoch_time = epoch_end_time - epoch_start_time
+        
+        # Log total worker times for this epoch
+        for worker_id, total_time in worker_times.items():
+            with open(workers_time_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch+1, worker_id+1, "", f"{total_time:.4f}"])
+        
+        # Log server epoch time
+        with open(server_time_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch+1, f"{total_epoch_time:.4f}", len(active_workers)])
+        
         if not active_workers:
             print("No active workers remaining. Stopping training...")
             break
             
-        print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers')
+        print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
@@ -179,6 +233,7 @@ if __name__ == '__main__':
             pass
         ws.close()
     
+
     torch.save(net.state_dict(), './Results/cifar10_trained_model.pth') #This saves the trained model
 
     server_socket.close()
