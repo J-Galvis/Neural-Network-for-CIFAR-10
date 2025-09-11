@@ -44,7 +44,7 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
-def start_server(num_workers=2):
+def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trained_model.pth'):
 
     HOST = 'localhost' 
     PORT = 6000
@@ -58,18 +58,14 @@ def start_server(num_workers=2):
     results_dir = './Results'
     os.makedirs(results_dir, exist_ok=True)
     
-    workers_time_file = os.path.join(results_dir, 'Workers time.csv')
     server_time_file = os.path.join(results_dir, 'Server time.csv')
-    
-    # Initialize Workers time CSV
-    with open(workers_time_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Epoch', 'Worker_ID', 'Batch_Processing_Time', 'Total_Worker_Time_Per_Epoch'])
+    net_time_file = os.path.join(results_dir, 'net_Times.csv')
     
     # Initialize Server time CSV
     with open(server_time_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
+    
     
     # Get the total number of batches (we only need the count now)
     total_batches = len(trainloader)
@@ -106,7 +102,9 @@ def start_server(num_workers=2):
     print(f"Training with {len(active_workers)} active workers")
 
     # Training loop
-    for epoch in range(5):  # Training for 5 epochs
+    netTrainingTime = time.time()
+
+    for epoch in range(num_epochs):  # Training for 5 epochs
         epoch_start_time = time.time()
         worker_times = {}  # Track time for each worker in this epoch
         
@@ -162,11 +160,6 @@ def start_server(num_workers=2):
                             worker_times[i] = 0
                         worker_times[i] += batch_processing_time
                         
-                        # Log individual batch processing time
-                        with open(workers_time_file, 'a', newline='') as f:
-                            writer = csv.writer(f)
-                            writer.writerow([epoch+1, i+1, f"{batch_processing_time:.4f}", ""])
-                        
                         successful_gradients.append(worker_grads)
                     else:
                         print(f"Failed to receive gradients from worker {i+1}")
@@ -205,12 +198,6 @@ def start_server(num_workers=2):
         epoch_end_time = time.time()
         total_epoch_time = epoch_end_time - epoch_start_time
         
-        # Log total worker times for this epoch
-        for worker_id, total_time in worker_times.items():
-            with open(workers_time_file, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow([epoch+1, worker_id+1, "", f"{total_time:.4f}"])
-        
         # Log server epoch time
         with open(server_time_file, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -222,6 +209,11 @@ def start_server(num_workers=2):
             
         print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
 
+    # Log net training time
+        with open(net_time_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(num_epochs, f"{netTrainingTime:.4f}")
+
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
     for ws in active_workers:
@@ -230,13 +222,12 @@ def start_server(num_workers=2):
         except:
             pass
         ws.close()
-    
 
-    torch.save(net.state_dict(), './Results/cifar10_trained_model.pth') #This saves the trained model
+
+    torch.save(net.state_dict(), saveFile) #This saves the trained model
 
     server_socket.close()
     print("Server stopped")
 
-
 if __name__ == '__main__':
-    start_server(1)
+    start_server()
