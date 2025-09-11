@@ -6,9 +6,47 @@ import torch.nn as nn
 import csv
 import os
 from defineNetwork import Net
+from defineNetwork import trainloader
 
-if __name__ == '__main__':
-    HOST = '10.180.208.105'
+def send_model_params(sock, model):
+    """Send current model parameters to worker"""
+    try:
+        params = {name: param.data.cpu().numpy() for name, param in model.named_parameters()}
+        data = pickle.dumps(params)
+        sock.sendall(len(data).to_bytes(4, 'big') + data)
+        return True
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
+        print(f"Connection error while sending parameters: {e}")
+        return False
+
+def send_batch_id(sock, batch_id):
+    """Send batch ID to worker"""
+    try:
+        data = pickle.dumps(batch_id)
+        sock.sendall(len(data).to_bytes(4, 'big') + data)
+        return True
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
+        print(f"Connection error while sending batch ID: {e}")
+        return False
+
+def receive_gradients(sock):
+    """Receive gradients from worker"""
+    try:
+        grad_len = int.from_bytes(sock.recv(4), 'big')
+        grad_data = b''
+        while len(grad_data) < grad_len:
+            chunk = sock.recv(min(grad_len - len(grad_data), 4096))
+            if not chunk:
+                raise ConnectionError("Connection closed while receiving data")
+            grad_data += chunk
+        return pickle.loads(grad_data)
+    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
+        print(f"Connection error while receiving gradients: {e}")
+        return None
+
+def start_server(num_workers=2):
+
+    HOST = 'localhost' 
     PORT = 6000
 
     # Initialize model and optimizer
@@ -32,12 +70,9 @@ if __name__ == '__main__':
     with open(server_time_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
-
-    # Import trainloader inside main block to avoid Windows multiprocessing issues
-    from defineNetwork import trainloader
     
-    # Prepare batches
-    batches = list(trainloader)
+    # Get the total number of batches (we only need the count now)
+    total_batches = len(trainloader)
 
     # Start server
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -46,48 +81,11 @@ if __name__ == '__main__':
     server_socket.listen()
     print(f'Server listening on {HOST}:{PORT}')
 
-    num_workers = 2  # You can change this
     worker_sockets = []
     for i in range(num_workers):
         conn, addr = server_socket.accept()
         print(f'Worker {i+1} connected from {addr}')
         worker_sockets.append(conn)
-
-    def send_model_params(sock, model):
-        """Send current model parameters to worker"""
-        try:
-            params = {name: param.data.cpu().numpy() for name, param in model.named_parameters()}
-            data = pickle.dumps(params)
-            sock.sendall(len(data).to_bytes(4, 'big') + data)
-            return True
-        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
-            print(f"Connection error while sending parameters: {e}")
-            return False
-
-    def send_batch(sock, batch):
-        """Send batch data to worker"""
-        try:
-            data = pickle.dumps(batch)
-            sock.sendall(len(data).to_bytes(4, 'big') + data)
-            return True
-        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
-            print(f"Connection error while sending batch: {e}")
-            return False
-
-    def receive_gradients(sock):
-        """Receive gradients from worker"""
-        try:
-            grad_len = int.from_bytes(sock.recv(4), 'big')
-            grad_data = b''
-            while len(grad_data) < grad_len:
-                chunk = sock.recv(min(grad_len - len(grad_data), 4096))
-                if not chunk:
-                    raise ConnectionError("Connection closed while receiving data")
-                grad_data += chunk
-            return pickle.loads(grad_data)
-        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
-            print(f"Connection error while receiving gradients: {e}")
-            return None
 
     # Send initial model parameters to all workers
     print("Sending initial model parameters to workers...")
@@ -116,22 +114,22 @@ if __name__ == '__main__':
         batch_idx = 0
         
         # Reset batch_idx for each epoch
-        while batch_idx < len(batches):
+        while batch_idx < total_batches:
             batch_gradients = []
             batches_sent = 0
             workers_to_remove = []
-            batch_start_times = {}  # Track when each worker starts processing a batch
+            batch_start_times = {}  # Track when workers
             
             # Send batches to active workers, but only send as many batches as we have workers
-            num_batches_to_send = min(len(active_workers), len(batches) - batch_idx)
+            num_batches_to_send = min(len(active_workers), total_batches - batch_idx)
             
             for i in range(num_batches_to_send):
                 if i < len(active_workers):
                     ws = active_workers[i]
-                    batch = batches[batch_idx]
+                    batch_id = batch_idx  # Send the batch index as ID
                     
-                    batch_start_times[i] = time.time()  # Record when batch is sent
-                    if send_batch(ws, batch):
+                    batch_start_times[i] = time.time()  
+                    if send_batch_id(ws, batch_id):
                         batch_idx += 1
                         batches_sent += 1
                     else:
@@ -238,3 +236,7 @@ if __name__ == '__main__':
 
     server_socket.close()
     print("Server stopped")
+
+
+if __name__ == '__main__':
+    start_server(1)
