@@ -52,7 +52,7 @@ def update_model_params(model, params_dict):
                 param.data = torch.tensor(params_dict[name], dtype=param.dtype)
                 
 def start_worker():
-    HOST = 'localhost'
+    HOST = '10.180.208.105'
     PORT = 6000
 
     # Initialize model (parameters will be synced from server)

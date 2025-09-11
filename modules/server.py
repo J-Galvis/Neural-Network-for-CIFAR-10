@@ -44,9 +44,9 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
-def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trained_model.pth'):
+def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trained_model.pth'):
 
-    HOST = 'localhost' 
+    HOST = '10.180.208.105' 
     PORT = 6000
 
     # Initialize model and optimizer
@@ -101,8 +101,8 @@ def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trai
 
     print(f"Training with {len(active_workers)} active workers")
 
-    # Training loop
-    netTrainingTime = time.time()
+    # Training loop - Record start time
+    net_training_start = time.time()
 
     for epoch in range(num_epochs):  # Training for 5 epochs
         epoch_start_time = time.time()
@@ -124,16 +124,18 @@ def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trai
             for i in range(num_batches_to_send):
                 if i < len(active_workers):
                     ws = active_workers[i]
-                    batch_id = batch_idx  # Send the batch index as ID
+                    current_batch_id = batch_idx + i  # Each worker gets a different batch
                     
                     batch_start_times[i] = time.time()  
-                    if send_batch_id(ws, batch_id):
-                        batch_idx += 1
+                    if send_batch_id(ws, current_batch_id):
                         batches_sent += 1
                     else:
                         print(f"Worker {i+1} disconnected, removing from active workers")
                         workers_to_remove.append(i)
                         ws.close()
+            
+            # Update batch_idx to reflect all batches sent
+            batch_idx += batches_sent
             
             # Remove disconnected workers
             for i in reversed(workers_to_remove):
@@ -209,10 +211,13 @@ def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trai
             
         print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
 
+    # Calculate total net training time
+    net_training_total = time.time() - net_training_start
+
     # Log net training time
-        with open(net_time_file, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(num_epochs, f"{netTrainingTime:.4f}")
+    with open(net_time_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([num_epochs, f"{net_training_total:.4f}"])
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
