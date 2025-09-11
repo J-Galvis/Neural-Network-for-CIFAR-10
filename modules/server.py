@@ -44,7 +44,7 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
-def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trained_model.pth'):
+def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trained_model.pth'):
 
     HOST = '10.180.208.105' 
     PORT = 6000
@@ -65,6 +65,11 @@ def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trai
     with open(server_time_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
+    
+    # Initialize net time CSV with worker columns
+    with open(net_time_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['num_Epochs', 'TrainingTime', 'Worker1_Name', 'Worker1_Time', 'Worker2_Name', 'Worker2_Time'])
     
     
     # Get the total number of batches (we only need the count now)
@@ -103,6 +108,7 @@ def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trai
 
     # Training loop - Record start time
     net_training_start = time.time()
+    workers_time = []
 
     for epoch in range(num_epochs):  # Training for 5 epochs
         epoch_start_time = time.time()
@@ -148,18 +154,27 @@ def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trai
         print(f"All batches sent for epoch {epoch+1}, waiting for gradients...")
         successful_gradients = []
         workers_to_remove = []
+        epoch_worker_times = []  # Track worker times for this epoch
         
         for i, ws in enumerate(active_workers):
+            worker_start_time = time.time()
             worker_grads = receive_gradients(ws)
+            worker_end_time = time.time()
+            worker_processing_time = worker_end_time - worker_start_time
+            
+            worker_name = f"Worker_{i+1}"
+            epoch_worker_times.append((worker_name, worker_processing_time))
+            
             if worker_grads is not None:
                 successful_gradients.append(worker_grads)
-                print(f"Received gradients from worker {i+1}")
+                print(f"Received gradients from worker {i+1} (time: {worker_processing_time:.4f}s)")
             else:
                 print(f"Failed to receive gradients from worker {i+1}")
                 workers_to_remove.append(i)
                 ws.close()
         
-        # Remove workers that failed to send gradients
+        # Store worker times for this epoch
+        workers_time.append(epoch_worker_times)        # Remove workers that failed to send gradients
         for i in reversed(workers_to_remove):
             active_workers.pop(i)
         
@@ -205,10 +220,23 @@ def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trai
     # Calculate total net training time
     net_training_total = time.time() - net_training_start
 
-    # Log net training time
+    # Prepare worker time data for CSV (up to 4 columns: worker1_name, worker1_time, worker2_name, worker2_time)
+    worker_csv_data = []
+    if workers_time:
+        # Get the last epoch's worker times
+        last_epoch_workers = workers_time[-1] if workers_time else []
+        for i in range(2):  # Support up to 2 workers (4 columns)
+            if i < len(last_epoch_workers):
+                worker_name, worker_time = last_epoch_workers[i]
+                worker_csv_data.extend([worker_name, f"{worker_time:.4f}"])
+            else:
+                worker_csv_data.extend(["", ""])  # Empty columns if fewer workers
+
+    # Log net training time with worker times
     with open(net_time_file, 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow([num_epochs, f"{net_training_total:.4f}"])
+        row_data = [num_epochs, f"{net_training_total:.4f}"] + worker_csv_data
+        writer.writerow(row_data)
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
