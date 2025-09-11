@@ -113,10 +113,9 @@ def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trai
         
         # Reset batch_idx for each epoch
         while batch_idx < total_batches:
-            batch_gradients = []
             batches_sent = 0
             workers_to_remove = []
-            batch_start_times = {}  # Track when workers
+            batch_start_times = {}
             
             # Send batches to active workers, but only send as many batches as we have workers
             num_batches_to_send = min(len(active_workers), total_batches - batch_idx)
@@ -144,57 +143,49 @@ def start_server(num_workers=2, num_epochs=1, saveFile = './Results/cifar10_trai
             if not active_workers:
                 print("All workers disconnected. Stopping training...")
                 break
+        
+        # After all batches in epoch are sent, receive gradients from all workers
+        print(f"All batches sent for epoch {epoch+1}, waiting for gradients...")
+        successful_gradients = []
+        workers_to_remove = []
+        
+        for i, ws in enumerate(active_workers):
+            worker_grads = receive_gradients(ws)
+            if worker_grads is not None:
+                successful_gradients.append(worker_grads)
+                print(f"Received gradients from worker {i+1}")
+            else:
+                print(f"Failed to receive gradients from worker {i+1}")
+                workers_to_remove.append(i)
+                ws.close()
+        
+        # Remove workers that failed to send gradients
+        for i in reversed(workers_to_remove):
+            active_workers.pop(i)
+        
+        # Average gradients and apply to model (once per epoch)
+        if successful_gradients:
+            optimizer.zero_grad()
+            for param_idx, param in enumerate(net.parameters()):
+                if param_idx < len(successful_gradients[0]):
+                    # Average gradients from all successful workers for this parameter
+                    avg_grad = sum(grads[param_idx] for grads in successful_gradients) / len(successful_gradients)
+                    param.grad = torch.tensor(avg_grad, dtype=param.dtype)
             
-            # Only try to receive gradients for the batches we actually sent
-            successful_gradients = []
+            optimizer.step()
+            print(f"Model updated after epoch {epoch+1}")
+            
+            # Send updated parameters to remaining workers for next epoch
             workers_to_remove = []
+            for i, ws in enumerate(active_workers):
+                if not send_model_params(ws, net):
+                    print(f"Failed to send updated parameters to worker {i+1}")
+                    workers_to_remove.append(i)
+                    ws.close()
             
-            for i in range(batches_sent):
-                if i < len(active_workers):
-                    worker_grads = receive_gradients(active_workers[i])
-                    if worker_grads is not None:
-                        # Calculate batch processing time for this worker
-                        batch_end_time = time.time()
-                        batch_processing_time = batch_end_time - batch_start_times[i]
-                        
-                        # Track worker time for this epoch
-                        if i not in worker_times:
-                            worker_times[i] = 0
-                        worker_times[i] += batch_processing_time
-                        
-                        successful_gradients.append(worker_grads)
-                    else:
-                        print(f"Failed to receive gradients from worker {i+1}")
-                        workers_to_remove.append(i)
-                        active_workers[i].close()
-            
-            # Remove workers that failed to send gradients
+            # Remove workers that couldn't receive updates
             for i in reversed(workers_to_remove):
-                if i < len(active_workers):
-                    active_workers.pop(i)
-            
-            # Average gradients and apply to model
-            if successful_gradients:
-                optimizer.zero_grad()
-                for param_idx, param in enumerate(net.parameters()):
-                    if param_idx < len(successful_gradients[0]):
-                        # Average gradients from all successful workers for this parameter
-                        avg_grad = sum(grads[param_idx] for grads in successful_gradients) / len(successful_gradients)
-                        param.grad = torch.tensor(avg_grad, dtype=param.dtype)
-                
-                optimizer.step()
-                
-                # Send updated parameters to remaining workers
-                workers_to_remove = []
-                for i, ws in enumerate(active_workers):
-                    if not send_model_params(ws, net):
-                        print(f"Failed to send updated parameters to worker {i+1}")
-                        workers_to_remove.append(i)
-                        ws.close()
-                
-                # Remove workers that couldn't receive updates
-                for i in reversed(workers_to_remove):
-                    active_workers.pop(i)
+                active_workers.pop(i)
         
         # Calculate total epoch time
         epoch_end_time = time.time()

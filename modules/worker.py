@@ -122,26 +122,7 @@ def start_worker():
                 
                 # Extract gradients
                 grads = [param.grad.cpu().numpy() for param in net.parameters() if param.grad is not None]
-                
-                # Send gradients back to server
-                if not send_gradients(client_socket, grads):
-                    print("Failed to send gradients, terminating")
-                    break
-                
-                # Receive updated model parameters
-                params_data = receive_data(client_socket)
-                if params_data is None:
-                    print("Failed to receive updated parameters, terminating")
-                    break
-                    
-                if params_data != b'DONE':
-                    try:
-                        updated_params = pickle.loads(params_data)
-                        update_model_params(net, updated_params)
-                    except Exception as e:
-                        print(f"Error updating model parameters: {e}")
-                        break
-                
+
                 batch_count += 1
                 if batch_count % 10 == 0:  # Print every 10 batches to reduce output
                     print(f"Processed {batch_count} batches (last batch ID: {batch_id}), last loss: {loss.item():.4f}")
@@ -151,6 +132,22 @@ def start_worker():
                 print(f"Batch ID data type: {type(batch_id) if 'batch_id' in locals() else 'undefined'}")
                 print(f"Raw data length: {len(data) if data else 'None'}")
                 break
+
+        # Send gradients back to server
+        if not send_gradients(client_socket, grads):
+            print("Failed to send gradients, terminating")
+        
+        # Receive updated model parameters
+        params_data = receive_data(client_socket)
+        if params_data is None:
+            print("Failed to receive updated parameters, terminating")
+            
+        if params_data != b'DONE':
+            try:
+                updated_params = pickle.loads(params_data)
+                update_model_params(net, updated_params)
+            except Exception as e:
+                print(f"Error updating model parameters: {e}")
 
     except Exception as e:
         print(f"Worker error: {e}")
