@@ -46,7 +46,7 @@ def receive_gradients(sock):
 
 def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trained_model.pth'):
 
-    HOST = '10.180.208.105' 
+    HOST = 'localhost' 
     PORT = 6000
 
     # Initialize model and optimizer

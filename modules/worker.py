@@ -9,7 +9,7 @@ def receive_data(sock):
     """Receive data with length prefix"""
     try:
         # Receive length prefix with timeout
-        sock.settimeout(30.0)  # 30 second timeout
+        sock.settimeout(120.0)  # 120 second timeout
         length_bytes = b''
         while len(length_bytes) < 4:
             chunk = sock.recv(4 - len(length_bytes))
@@ -52,7 +52,7 @@ def update_model_params(model, params_dict):
                 param.data = torch.tensor(params_dict[name], dtype=param.dtype)
                 
 def start_worker():
-    HOST = '10.180.208.105'
+    HOST = 'localhost'
     PORT = 6000
 
     # Initialize model (parameters will be synced from server)
@@ -133,21 +133,21 @@ def start_worker():
                 print(f"Raw data length: {len(data) if data else 'None'}")
                 break
 
-        # Send gradients back to server
-        if not send_gradients(client_socket, grads):
-            print("Failed to send gradients, terminating")
-        
-        # Receive updated model parameters
-        params_data = receive_data(client_socket)
-        if params_data is None:
-            print("Failed to receive updated parameters, terminating")
+            # Send gradients back to server
+            if not send_gradients(client_socket, grads):
+                print("Failed to send gradients, terminating")
             
-        if params_data != b'DONE':
-            try:
-                updated_params = pickle.loads(params_data)
-                update_model_params(net, updated_params)
-            except Exception as e:
-                print(f"Error updating model parameters: {e}")
+            # Receive updated model parameters
+            params_data = receive_data(client_socket)
+            if params_data is None:
+                print("Failed to receive updated parameters, terminating")
+                
+            if params_data != b'DONE':
+                try:
+                    updated_params = pickle.loads(params_data)
+                    update_model_params(net, updated_params)
+                except Exception as e:
+                    print(f"Error updating model parameters: {e}")
 
     except Exception as e:
         print(f"Worker error: {e}")

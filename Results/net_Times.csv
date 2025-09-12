@@ -1,3 +1,2 @@
-num_Epochs,TrainingTime,Accuracy
-1,140.5644
-2,1757605334.0685
+num_Epochs,TrainingTime,Worker1_Name,Worker1_Time,Worker2_Name,Worker2_Time
+2,140.6909,Worker_1,0.0000,Worker_2,0.0020
