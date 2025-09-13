@@ -19,18 +19,18 @@ def send_model_params(sock, model):
         print(f"Connection error while sending parameters: {e}")
         return False
 
-def send_batch_id(sock, batch_id):
-    """Send batch ID to worker"""
+def send_batch_list(sock, batch_list):
+    """Send list of batch IDs to worker for the epoch"""
     try:
-        data = pickle.dumps(batch_id)
+        data = pickle.dumps(batch_list)
         sock.sendall(len(data).to_bytes(4, 'big') + data)
         return True
     except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError) as e:
-        print(f"Connection error while sending batch ID: {e}")
+        print(f"Connection error while sending batch list: {e}")
         return False
 
 def receive_gradients(sock):
-    """Receive gradients from worker"""
+    """Receive accumulated gradients from worker after epoch"""
     try:
         grad_len = int.from_bytes(sock.recv(4), 'big')
         grad_data = b''
@@ -66,13 +66,7 @@ def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trai
         writer = csv.writer(f)
         writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
     
-    # Initialize net time CSV with worker columns
-    with open(net_time_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['num_Epochs', 'TrainingTime', 'Worker1_Name', 'Worker1_Time', 'Worker2_Name', 'Worker2_Time'])
-    
-    
-    # Get the total number of batches (we only need the count now)
+    # Get the total number of batches
     total_batches = len(trainloader)
 
     # Start server
@@ -106,79 +100,62 @@ def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trai
 
     print(f"Training with {len(active_workers)} active workers")
 
-    # Training loop - Record start time
+    # Training loop
     net_training_start = time.time()
-    workers_time = []
 
-    for epoch in range(num_epochs):  # Training for 5 epochs
+    for epoch in range(num_epochs):
         epoch_start_time = time.time()
-        worker_times = {}  # Track time for each worker in this epoch
-        
         print(f'Epoch {epoch+1}')
-        batch_idx = 0
         
-        # Reset batch_idx for each epoch
-        while batch_idx < total_batches:
-            batches_sent = 0
-            workers_to_remove = []
-            batch_start_times = {}
-            
-            # Send batches to active workers, but only send as many batches as we have workers
-            num_batches_to_send = min(len(active_workers), total_batches - batch_idx)
-            
-            for i in range(num_batches_to_send):
-                if i < len(active_workers):
-                    ws = active_workers[i]
-                    current_batch_id = batch_idx + i  # Each worker gets a different batch
-                    
-                    batch_start_times[i] = time.time()  
-                    if send_batch_id(ws, current_batch_id):
-                        batches_sent += 1
-                    else:
-                        print(f"Worker {i+1} disconnected, removing from active workers")
-                        workers_to_remove.append(i)
-                        ws.close()
-            
-            # Update batch_idx to reflect all batches sent
-            batch_idx += batches_sent
-            
-            # Remove disconnected workers
-            for i in reversed(workers_to_remove):
-                active_workers.pop(i)
-            
-            if not active_workers:
-                print("All workers disconnected. Stopping training...")
-                break
+        # Distribute batches among workers for this epoch
+        batches_per_worker = total_batches // len(active_workers)
+        remaining_batches = total_batches % len(active_workers)
         
-        # After all batches in epoch are sent, receive gradients from all workers
-        print(f"All batches sent for epoch {epoch+1}, waiting for gradients...")
+        workers_to_remove = []
+        
+        # Send batch assignments to each worker
+        batch_start = 0
+        for i, ws in enumerate(active_workers):
+            # Calculate how many batches this worker gets
+            worker_batch_count = batches_per_worker + (1 if i < remaining_batches else 0)
+            worker_batch_list = list(range(batch_start, batch_start + worker_batch_count))
+            batch_start += worker_batch_count
+            
+            if send_batch_list(ws, worker_batch_list):
+                print(f"Sent {len(worker_batch_list)} batches to worker {i+1}")
+            else:
+                print(f"Failed to send batch list to worker {i+1}, removing from active workers")
+                workers_to_remove.append(i)
+                ws.close()
+        
+        # Remove disconnected workers
+        for i in reversed(workers_to_remove):
+            active_workers.pop(i)
+        
+        if not active_workers:
+            print("All workers disconnected. Stopping training...")
+            break
+        
+        # Wait for all workers to finish their batches and send accumulated gradients
+        print(f"Waiting for accumulated gradients from {len(active_workers)} workers...")
         successful_gradients = []
         workers_to_remove = []
-        epoch_worker_times = []  # Track worker times for this epoch
         
         for i, ws in enumerate(active_workers):
-            worker_start_time = time.time()
             worker_grads = receive_gradients(ws)
-            worker_end_time = time.time()
-            worker_processing_time = worker_end_time - worker_start_time
-            
-            worker_name = f"Worker_{i+1}"
-            epoch_worker_times.append((worker_name, worker_processing_time))
-            
             if worker_grads is not None:
                 successful_gradients.append(worker_grads)
-                print(f"Received gradients from worker {i+1} (time: {worker_processing_time:.4f}s)")
+                print(f"Received accumulated gradients from worker {i+1}")
             else:
                 print(f"Failed to receive gradients from worker {i+1}")
                 workers_to_remove.append(i)
                 ws.close()
         
-        # Store worker times for this epoch
-        workers_time.append(epoch_worker_times)        # Remove workers that failed to send gradients
+        # Remove workers that failed to send gradients
         for i in reversed(workers_to_remove):
             active_workers.pop(i)
         
-        # Average gradients and apply to model (once per epoch)
+        # Average gradients and update model (once per epoch)
         if successful_gradients:
             optimizer.zero_grad()
             for param_idx, param in enumerate(net.parameters()):
@@ -191,16 +168,17 @@ def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trai
             print(f"Model updated after epoch {epoch+1}")
             
             # Send updated parameters to remaining workers for next epoch
-            workers_to_remove = []
-            for i, ws in enumerate(active_workers):
-                if not send_model_params(ws, net):
-                    print(f"Failed to send updated parameters to worker {i+1}")
-                    workers_to_remove.append(i)
-                    ws.close()
-            
-            # Remove workers that couldn't receive updates
-            for i in reversed(workers_to_remove):
-                active_workers.pop(i)
+            if epoch < num_epochs - 1:  # Don't send if this is the last epoch
+                workers_to_remove = []
+                for i, ws in enumerate(active_workers):
+                    if not send_model_params(ws, net):
+                        print(f"Failed to send updated parameters to worker {i+1}")
+                        workers_to_remove.append(i)
+                        ws.close()
+                
+                # Remove workers that couldn't receive updates
+                for i in reversed(workers_to_remove):
+                    active_workers.pop(i)
         
         # Calculate total epoch time
         epoch_end_time = time.time()
@@ -220,23 +198,10 @@ def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trai
     # Calculate total net training time
     net_training_total = time.time() - net_training_start
 
-    # Prepare worker time data for CSV (up to 4 columns: worker1_name, worker1_time, worker2_name, worker2_time)
-    worker_csv_data = []
-    if workers_time:
-        # Get the last epoch's worker times
-        last_epoch_workers = workers_time[-1] if workers_time else []
-        for i in range(2):  # Support up to 2 workers (4 columns)
-            if i < len(last_epoch_workers):
-                worker_name, worker_time = last_epoch_workers[i]
-                worker_csv_data.extend([worker_name, f"{worker_time:.4f}"])
-            else:
-                worker_csv_data.extend(["", ""])  # Empty columns if fewer workers
-
-    # Log net training time with worker times
+    # Log net training time
     with open(net_time_file, 'a', newline='') as f:
         writer = csv.writer(f)
-        row_data = [num_epochs, f"{net_training_total:.4f}"] + worker_csv_data
-        writer.writerow(row_data)
+        writer.writerow([num_epochs, f"{net_training_total:.4f}"])
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
@@ -247,9 +212,7 @@ def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trai
             pass
         ws.close()
 
-
-    torch.save(net.state_dict(), saveFile) #This saves the trained model
-
+    torch.save(net.state_dict(), saveFile)
     server_socket.close()
     print("Server stopped")
 

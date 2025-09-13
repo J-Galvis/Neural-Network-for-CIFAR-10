@@ -8,8 +8,7 @@ from defineNetwork import trainloader
 def receive_data(sock):
     """Receive data with length prefix"""
     try:
-        # Receive length prefix with timeout
-        sock.settimeout(120.0)  # 120 second timeout
+        sock.settimeout(60.0)  # Longer timeout for epoch processing
         length_bytes = b''
         while len(length_bytes) < 4:
             chunk = sock.recv(4 - len(length_bytes))
@@ -27,7 +26,7 @@ def receive_data(sock):
                 raise ConnectionError("Connection closed while receiving data")
             data += chunk
         
-        sock.settimeout(None)  # Remove timeout
+        sock.settimeout(None)
         return data
     except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, OSError) as e:
         print(f"Connection error while receiving data: {e}")
@@ -35,7 +34,7 @@ def receive_data(sock):
         return None
 
 def send_gradients(sock, gradients):
-    """Send gradients to server"""
+    """Send accumulated gradients to server"""
     try:
         grad_data = pickle.dumps(gradients)
         sock.sendall(len(grad_data).to_bytes(4, 'big') + grad_data)
@@ -50,12 +49,22 @@ def update_model_params(model, params_dict):
         for name, param in model.named_parameters():
             if name in params_dict:
                 param.data = torch.tensor(params_dict[name], dtype=param.dtype)
+    return
+
+def accumulate_gradients(accumulated_grads, current_grads):
+    """Accumulate gradients from current batch"""
+    if accumulated_grads is None:
+        return [grad.clone() for grad in current_grads]
+    else:
+        for i, grad in enumerate(current_grads):
+            accumulated_grads[i] += grad
+        return accumulated_grads
                 
 def start_worker():
     HOST = 'localhost'
     PORT = 6000
 
-    # Initialize model (parameters will be synced from server)
+    # Initialize model
     net = Net()
     criterion = nn.CrossEntropyLoss()
 
@@ -73,15 +82,15 @@ def start_worker():
         params_data = receive_data(client_socket)
         if params_data is None:
             print("Failed to receive initial parameters")
-            exit(1)
+            return
         
         initial_params = pickle.loads(params_data)
         update_model_params(net, initial_params)
-        print("Received initial model parameters")
+        print("Received and applied initial model parameters")
 
-        batch_count = 0
+        epoch_count = 0
         while True:
-            # Receive batch ID or termination signal
+            # Receive batch list, updated parameters, or termination signal
             data = receive_data(client_socket)
             
             if data is None:
@@ -93,61 +102,74 @@ def start_worker():
                 print("Received termination signal")
                 break
             
-            # Process batch ID
             try:
-                batch_id = pickle.loads(data)
+                received_data = pickle.loads(data)
                 
-                # Debug: Check what we received
-                if isinstance(batch_id, bytes) and batch_id == b'DONE':
-                    print("Received DONE signal as batch data")
-                    break
-                elif not isinstance(batch_id, int):
-                    print(f"Unexpected batch ID format: {type(batch_id)}, value: {batch_id}")
+                # Check if it's updated parameters (dict) or batch list (list)
+                if isinstance(received_data, dict):
+                    # This is updated model parameters
+                    update_model_params(net, received_data)
+                    print("Received and applied updated model parameters")
                     continue
+                    
+                elif isinstance(received_data, list):
+                    # This is a list of batch IDs for this epoch
+                    batch_ids = received_data
+                    epoch_count += 1
+                    print(f"Starting epoch {epoch_count}, processing {len(batch_ids)} batches")
+                    
+                    # Initialize gradient accumulator
+                    accumulated_grads = None
+                    total_loss = 0.0
+                    
+                    # Process all batches for this epoch
+                    for batch_idx, batch_id in enumerate(batch_ids):
+                        # Validate batch ID
+                        if batch_id < 0 or batch_id >= len(batches):
+                            print(f"Invalid batch ID: {batch_id}, skipping")
+                            continue
+                        
+                        # Get the actual batch data
+                        batch = batches[batch_id]
+                        inputs, labels = batch[0], batch[1]
+                        
+                        # Forward pass and compute gradients
+                        net.zero_grad()
+                        outputs = net(inputs)
+                        loss = criterion(outputs, labels)
+                        loss.backward()
+                        
+                        total_loss += loss.item()
+                        
+                        # Accumulate gradients
+                        current_grads = [param.grad.clone() for param in net.parameters() if param.grad is not None]
+                        accumulated_grads = accumulate_gradients(accumulated_grads, current_grads)
+                        
+                        if (batch_idx + 1) % 10 == 0:
+                            print(f"Processed {batch_idx + 1}/{len(batch_ids)} batches, avg loss: {total_loss/(batch_idx+1):.4f}")
+                    
+                    print(f"Epoch {epoch_count} completed. Avg loss: {total_loss/len(batch_ids):.4f}")
+                    
+                    # Convert accumulated gradients to numpy and send to server
+                    if accumulated_grads:
+                        final_grads = [grad.cpu().numpy() for grad in accumulated_grads]
+                        
+                        if not send_gradients(client_socket, final_grads):
+                            print("Failed to send accumulated gradients, terminating")
+                            break
+                        print(f"Sent accumulated gradients for epoch {epoch_count}")
+                    else:
+                        print("No gradients to send")
+                        break
                 
-                # Check if batch ID is valid
-                if batch_id < 0 or batch_id >= len(batches):
-                    print(f"Invalid batch ID: {batch_id}, available range: 0-{len(batches)-1}")
+                else:
+                    print(f"Unexpected data type received: {type(received_data)}")
                     continue
-                
-                # Get the actual batch data using the batch ID
-                batch = batches[batch_id]
-                inputs, labels = batch[0], batch[1]
-                
-                # Forward pass and compute gradients
-                net.zero_grad()
-                outputs = net(inputs)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                
-                # Extract gradients
-                grads = [param.grad.cpu().numpy() for param in net.parameters() if param.grad is not None]
-
-                batch_count += 1
-                if batch_count % 10 == 0:  # Print every 10 batches to reduce output
-                    print(f"Processed {batch_count} batches (last batch ID: {batch_id}), last loss: {loss.item():.4f}")
                 
             except Exception as e:
-                print(f"Error processing batch ID: {e}")
-                print(f"Batch ID data type: {type(batch_id) if 'batch_id' in locals() else 'undefined'}")
+                print(f"Error processing received data: {e}")
                 print(f"Raw data length: {len(data) if data else 'None'}")
                 break
-
-            # Send gradients back to server
-            if not send_gradients(client_socket, grads):
-                print("Failed to send gradients, terminating")
-            
-            # Receive updated model parameters
-            params_data = receive_data(client_socket)
-            if params_data is None:
-                print("Failed to receive updated parameters, terminating")
-                
-            if params_data != b'DONE':
-                try:
-                    updated_params = pickle.loads(params_data)
-                    update_model_params(net, updated_params)
-                except Exception as e:
-                    print(f"Error updating model parameters: {e}")
 
     except Exception as e:
         print(f"Worker error: {e}")
