@@ -5,11 +5,14 @@ import time
 import torch.nn as nn
 import csv
 import os
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+import torch.optim as optim
 from defineNetwork import Net
 from defineNetwork import trainloader
 
 def send_model_params(sock, model):
-    """Send current model parameters to worker"""
+    """Send current model parameters to worker (parameters only)"""
     try:
         params = {name: param.data.cpu().numpy() for name, param in model.named_parameters()}
         data = pickle.dumps(params)
@@ -44,15 +47,36 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
-def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trained_model.pth'):
+def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trained_model.pth'):
 
     HOST = 'localhost' 
     PORT = 6000
 
-    # Initialize model and optimizer
+    transform = transforms.Compose(
+    [transforms.ToTensor(),
+     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    
+    trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
+
+    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+
     net = Net()
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+
+    optimizer = optim.AdamW(net.parameters(), lr=0.001, weight_decay=1e-2, 
+                           betas=(0.9, 0.999), eps=1e-8)
+    
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer, 
+        max_lr=0.01,
+        epochs=num_epochs,
+        steps_per_epoch=len(trainloader),
+        pct_start=0.3,
+        div_factor=10,
+        final_div_factor=100
+    )
 
     # Initialize CSV files for time tracking
     results_dir = './Results'
@@ -158,14 +182,24 @@ def start_server(num_workers=2, num_epochs=2, saveFile = './Results/cifar10_trai
         # Average gradients and update model (once per epoch)
         if successful_gradients:
             optimizer.zero_grad()
+            
+            # Average gradients from all successful workers
+            num_workers = len(successful_gradients)
             for param_idx, param in enumerate(net.parameters()):
                 if param_idx < len(successful_gradients[0]):
                     # Average gradients from all successful workers for this parameter
-                    avg_grad = sum(grads[param_idx] for grads in successful_gradients) / len(successful_gradients)
-                    param.grad = torch.tensor(avg_grad, dtype=param.dtype)
+                    avg_grad = sum(torch.tensor(grads[param_idx], device=param.device, dtype=param.dtype) 
+                                 for grads in successful_gradients) / num_workers
+                    param.grad = avg_grad
             
+            # Apply gradient clipping before optimizer step
+            torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=1.0)
+            
+            # Update model parameters
             optimizer.step()
-            print(f"Model updated after epoch {epoch+1}")
+            scheduler.step()
+            
+            print(f"Model updated after epoch {epoch+1} using {num_workers} workers")
             
             # Send updated parameters to remaining workers for next epoch
             if epoch < num_epochs - 1:  # Don't send if this is the last epoch

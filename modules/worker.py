@@ -2,6 +2,7 @@ import socket
 import pickle
 import torch
 import torch.nn as nn
+import torch.optim as optim
 from defineNetwork import Net
 from defineNetwork import trainloader
 
@@ -48,7 +49,7 @@ def update_model_params(model, params_dict):
     with torch.no_grad():
         for name, param in model.named_parameters():
             if name in params_dict:
-                param.data = torch.tensor(params_dict[name], dtype=param.dtype)
+                param.data = torch.tensor(params_dict[name], dtype=param.dtype, device=param.device)
     return
 
 def accumulate_gradients(accumulated_grads, current_grads):
@@ -64,7 +65,7 @@ def start_worker():
     HOST = 'localhost'
     PORT = 6000
 
-    # Initialize model
+    # Initialize model and criterion (no optimizer/scheduler - workers only compute gradients)
     net = Net()
     criterion = nn.CrossEntropyLoss()
 
@@ -76,6 +77,14 @@ def start_worker():
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((HOST, PORT))
     print("Connected to server")
+
+    scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    net.to(device)
+    
+    # Create a dummy optimizer for scaler.unscale_ (required for AMP)
+    if scaler is not None:
+        dummy_optimizer = optim.SGD(net.parameters(), lr=0.01)
 
     try:
         # Receive initial model parameters
@@ -89,6 +98,7 @@ def start_worker():
         print("Received and applied initial model parameters")
 
         epoch_count = 0
+        
         while True:
             # Receive batch list, updated parameters, or termination signal
             data = receive_data(client_socket)
@@ -118,36 +128,56 @@ def start_worker():
                     epoch_count += 1
                     print(f"Starting epoch {epoch_count}, processing {len(batch_ids)} batches")
                     
+                    # Set model to training mode
+                    net.train()
+                    
                     # Initialize gradient accumulator
                     accumulated_grads = None
                     total_loss = 0.0
                     
-                    # Process all batches for this epoch
+                    # Process all batches for this epoch (gradient computation only)
                     for batch_idx, batch_id in enumerate(batch_ids):
-                        # Validate batch ID
-                        if batch_id < 0 or batch_id >= len(batches):
-                            print(f"Invalid batch ID: {batch_id}, skipping")
+                        if batch_id >= len(batches):
+                            print(f"Warning: batch_id {batch_id} exceeds available batches ({len(batches)})")
                             continue
-                        
-                        # Get the actual batch data
-                        batch = batches[batch_id]
-                        inputs, labels = batch[0], batch[1]
-                        
-                        # Forward pass and compute gradients
+                            
+                        inputs, labels = batches[batch_id]
+                        inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+
+                        # Zero gradients for this batch
                         net.zero_grad()
-                        outputs = net(inputs)
-                        loss = criterion(outputs, labels)
-                        loss.backward()
                         
+                        # Forward pass and loss computation
+                        if scaler is not None:
+                            with torch.cuda.amp.autocast():
+                                outputs = net(inputs)
+                                loss = criterion(outputs, labels)
+                            
+                            # Backward pass to compute gradients
+                            scaler.scale(loss).backward()
+                            
+                            # Unscale gradients for accumulation
+                            scaler.unscale_(dummy_optimizer)
+                            
+                            # Get current gradients (unscaled)
+                            current_grads = [param.grad.clone() if param.grad is not None else torch.zeros_like(param) 
+                                           for param in net.parameters()]
+                        else:
+                            outputs = net(inputs)
+                            loss = criterion(outputs, labels)
+                            
+                            # Backward pass to compute gradients
+                            loss.backward()
+                            
+                            # Get current gradients
+                            current_grads = [param.grad.clone() if param.grad is not None else torch.zeros_like(param) 
+                                           for param in net.parameters()]
+
                         total_loss += loss.item()
                         
                         # Accumulate gradients
-                        current_grads = [param.grad.clone() for param in net.parameters() if param.grad is not None]
                         accumulated_grads = accumulate_gradients(accumulated_grads, current_grads)
-                        
-                        if (batch_idx + 1) % 10 == 0:
-                            print(f"Processed {batch_idx + 1}/{len(batch_ids)} batches, avg loss: {total_loss/(batch_idx+1):.4f}")
-                    
+
                     print(f"Epoch {epoch_count} completed. Avg loss: {total_loss/len(batch_ids):.4f}")
                     
                     # Convert accumulated gradients to numpy and send to server
@@ -158,6 +188,7 @@ def start_worker():
                             print("Failed to send accumulated gradients, terminating")
                             break
                         print(f"Sent accumulated gradients for epoch {epoch_count}")
+                        
                     else:
                         print("No gradients to send")
                         break
