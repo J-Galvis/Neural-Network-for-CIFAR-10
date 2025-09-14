@@ -47,14 +47,14 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
-def start_server(num_workers=2, num_epochs=5, saveFile = './Results/cifar10_trained_model.pth'):
+def start_server(num_workers=2, num_epochs=25, saveFile = './Results/cifar10_trained_model.pth'):
 
     HOST = 'localhost' 
     PORT = 6000
 
     transform = transforms.Compose(
     [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+     transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
     
     trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 
