@@ -9,7 +9,7 @@ import time
 import csv
 import os
 
-from defineNetwork import Net, testloader
+from defineNetwork import Net
 from testing import testingNetwork
 
 HOST = 'localhost' 
@@ -51,6 +51,12 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
+def accuracyTest(net, transform, num_workers):
+    print("starting testing . . . ")
+    testset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=num_workers)
+    return testingNetwork(testloader, net)
+
 def start_server(num_workers=2, num_epochs=50, saveFile = './Results/cifar10_trained_model.pth'):
 
     transform = transforms.Compose(
@@ -61,10 +67,7 @@ def start_server(num_workers=2, num_epochs=50, saveFile = './Results/cifar10_tra
 
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
 
-    classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
     net = Net()
-    criterion = nn.CrossEntropyLoss()
 
     optimizer = optim.AdamW(net.parameters(), lr=0.001, weight_decay=1e-2, 
                            betas=(0.9, 0.999), eps=1e-8)
@@ -229,12 +232,11 @@ def start_server(num_workers=2, num_epochs=50, saveFile = './Results/cifar10_tra
             break
             
         print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
-    
-
-    Accuracy = testingNetwork(testloader, net)
 
     # Calculate total net training time
     net_training_total = time.time() - net_training_start
+
+    Accuracy = accuracyTest(net, transform, num_workers)
 
     # Log net training time
     with open(net_time_file, 'a', newline='') as f:

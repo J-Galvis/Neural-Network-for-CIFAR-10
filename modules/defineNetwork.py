@@ -21,8 +21,6 @@ trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=
 
 trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
 
-classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-
 class Net(nn.Module):
 
     def __init__(self):
