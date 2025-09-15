@@ -12,7 +12,7 @@ import os
 from defineNetwork import Net
 from testing import testingNetwork
 
-HOST = 'localhost' 
+HOST = '192.168.0.137' 
 PORT = 6000
 
 def send_model_params(sock, model):
@@ -57,7 +57,7 @@ def accuracyTest(net, transform, num_workers):
     testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=num_workers)
     return testingNetwork(testloader, net)
 
-def start_server(num_workers=2, num_epochs=50, saveFile = './Results/cifar10_trained_model.pth'):
+def start_server(num_workers=2, num_epochs=20, saveFile = './Results/cifar10_trained_model.pth'):
 
     transform = transforms.Compose(
     [transforms.ToTensor(),
