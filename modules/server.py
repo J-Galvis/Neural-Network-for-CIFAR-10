@@ -1,15 +1,19 @@
+import torchvision.transforms as transforms
+import torchvision.datasets as datasets
+import torch.optim as optim
+import torch.nn as nn
 import socket
 import pickle
 import torch
 import time
-import torch.nn as nn
 import csv
 import os
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-import torch.optim as optim
-from defineNetwork import Net
-from defineNetwork import trainloader
+
+from defineNetwork import Net, testloader
+from testing import testingNetwork
+
+HOST = 'localhost' 
+PORT = 6000
 
 def send_model_params(sock, model):
     """Send current model parameters to worker (parameters only)"""
@@ -47,10 +51,7 @@ def receive_gradients(sock):
         print(f"Connection error while receiving gradients: {e}")
         return None
 
-def start_server(num_workers=2, num_epochs=25, saveFile = './Results/cifar10_trained_model.pth'):
-
-    HOST = 'localhost' 
-    PORT = 6000
+def start_server(num_workers=2, num_epochs=50, saveFile = './Results/cifar10_trained_model.pth'):
 
     transform = transforms.Compose(
     [transforms.ToTensor(),
@@ -228,6 +229,9 @@ def start_server(num_workers=2, num_epochs=25, saveFile = './Results/cifar10_tra
             break
             
         print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
+    
+
+    Accuracy = testingNetwork(testloader, net)
 
     # Calculate total net training time
     net_training_total = time.time() - net_training_start
@@ -235,7 +239,7 @@ def start_server(num_workers=2, num_epochs=25, saveFile = './Results/cifar10_tra
     # Log net training time
     with open(net_time_file, 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow([num_epochs, f"{net_training_total:.4f}"])
+        writer.writerow([num_epochs, f"{net_training_total:.4f}", f"{Accuracy:.2f}"])
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")

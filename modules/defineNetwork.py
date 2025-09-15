@@ -1,16 +1,13 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-import torchvision.datasets as datasets
 import torchvision.transforms as transforms
+import torchvision.datasets as datasets
 import torch.nn.functional as F
+import torch.optim as optim
+import torch.nn as nn
+import platform
+import torch
 import time
 import csv
 import os
-
-
-import os
-import platform
 
 num_workers = 0 if platform.system() == 'Windows' else os.cpu_count()  # Fix Windows multiprocessing shit 
 

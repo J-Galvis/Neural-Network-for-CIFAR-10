@@ -1,10 +1,14 @@
+import torch.optim as optim
+import torch.nn as nn
 import socket
 import pickle
 import torch
-import torch.nn as nn
-import torch.optim as optim
+
 from defineNetwork import Net
 from defineNetwork import trainloader
+
+HOST = 'localhost'
+PORT = 6000
 
 def receive_data(sock):
     """Receive data with length prefix"""
@@ -62,8 +66,6 @@ def accumulate_gradients(accumulated_grads, current_grads):
         return accumulated_grads
                 
 def start_worker():
-    HOST = 'localhost'
-    PORT = 6000
 
     # Initialize model and criterion (no optimizer/scheduler - workers only compute gradients)
     net = Net()
