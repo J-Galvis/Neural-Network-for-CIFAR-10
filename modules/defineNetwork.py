@@ -9,17 +9,21 @@ import time
 import csv
 import os
 
-num_workers = 0 if platform.system() == 'Windows' else os.cpu_count()  # Fix Windows multiprocessing shit 
+HOST = 'localhost' 
+PORT = 6000
 
-torch.set_num_threads(num_workers if num_workers > 0 else 1)
+NUM_WORKERS=2
+NUM_EPOCHS=10
 
-transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+SAVE_FILE = './Results/cifar10_trained_model.pth'
 
-trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+TRANSFORM = transforms.Compose(
+[transforms.ToTensor(),
+    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
 
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
+TRAINSET = datasets.CIFAR10(root='./data', train=True, download=True, transform=TRANSFORM)
+
+TRAINLOADER = torch.utils.data.DataLoader(TRAINSET, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=torch.cuda.is_available(), persistent_workers=(NUM_WORKERS > 0))
 
 class Net(nn.Module):
 
@@ -88,6 +92,18 @@ class Net(nn.Module):
         return x
 
 def trainNet(num_epochs: int):
+
+    num_workers = 0 if platform.system() == 'Windows' else os.cpu_count()  # Fix Windows multiprocessing shit 
+
+    torch.set_num_threads(num_workers if num_workers > 0 else 1)
+
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+    trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
 
     net = Net()
     criterion = nn.CrossEntropyLoss()

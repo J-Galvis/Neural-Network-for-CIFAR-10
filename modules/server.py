@@ -9,11 +9,19 @@ import time
 import csv
 import os
 
-from defineNetwork import Net
-from testing import testingNetwork
+from defineNetwork import Net, TRANSFORM, NUM_WORKERS, NUM_EPOCHS, SAVE_FILE, TRAINLOADER, PORT, HOST
 
-HOST = '192.168.0.137' 
-PORT = 6000
+def testingNetwork( testloader, net):
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for data in testloader:
+            images, labels = data
+            outputs = net(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    return (100 * correct / total)
 
 def send_model_params(sock, model):
     """Send current model parameters to worker (parameters only)"""
@@ -57,15 +65,8 @@ def accuracyTest(net, transform, num_workers):
     testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=num_workers)
     return testingNetwork(testloader, net)
 
-def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_trained_model.pth'):
-
-    transform = transforms.Compose(
-    [transforms.ToTensor(),
-     transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
-    
-    trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
+def start_server():
+    num_workers = NUM_WORKERS
 
     net = Net()
 
@@ -75,8 +76,8 @@ def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_tra
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, 
         max_lr=0.01,
-        epochs=num_epochs,
-        steps_per_epoch=len(trainloader),
+        epochs=NUM_EPOCHS,
+        steps_per_epoch=len(TRAINLOADER),
         pct_start=0.3,
         div_factor=10,
         final_div_factor=100
@@ -95,7 +96,7 @@ def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_tra
         writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
     
     # Get the total number of batches
-    total_batches = len(trainloader)
+    total_batches = len(TRAINLOADER)
 
     # Start server
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -131,7 +132,7 @@ def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_tra
     # Training loop
     net_training_start = time.time()
 
-    for epoch in range(num_epochs):
+    for epoch in range(NUM_EPOCHS):
         epoch_start_time = time.time()
         print(f'Epoch {epoch+1}')
         
@@ -206,7 +207,7 @@ def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_tra
             print(f"Model updated after epoch {epoch+1} using {num_workers} workers")
             
             # Send updated parameters to remaining workers for next epoch
-            if epoch < num_epochs - 1:  # Don't send if this is the last epoch
+            if epoch < NUM_EPOCHS - 1:  # Don't send if this is the last epoch
                 workers_to_remove = []
                 for i, ws in enumerate(active_workers):
                     if not send_model_params(ws, net):
@@ -236,12 +237,12 @@ def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_tra
     # Calculate total net training time
     net_training_total = time.time() - net_training_start
 
-    Accuracy = accuracyTest(net, transform, num_workers)
+    Accuracy = accuracyTest(net, TRANSFORM, num_workers)
 
     # Log net training time
     with open(net_time_file, 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow([num_epochs, f"{net_training_total:.4f}", f"{Accuracy:.2f}"])
+        writer.writerow([NUM_EPOCHS, f"{net_training_total:.4f}", f"{Accuracy:.2f}"])
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
@@ -252,7 +253,7 @@ def start_server(num_workers=2, num_epochs=60, saveFile = './Results/cifar10_tra
             pass
         ws.close()
 
-    torch.save(net.state_dict(), saveFile)
+    torch.save(net.state_dict(), SAVE_FILE)
     server_socket.close()
     print("Server stopped")
 

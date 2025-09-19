@@ -4,8 +4,7 @@ import socket
 import pickle
 import torch
 
-from defineNetwork import Net
-from defineNetwork import trainloader
+from defineNetwork import Net, TRAINLOADER
 
 HOST = 'localhost'
 PORT = 6000
@@ -72,7 +71,7 @@ def start_worker():
     criterion = nn.CrossEntropyLoss()
 
     # Prepare batches list to access by index
-    batches = list(trainloader)
+    batches = list(TRAINLOADER)
     print(f"Worker loaded {len(batches)} batches locally")
 
     # Connect to server
