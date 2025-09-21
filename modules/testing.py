@@ -1,6 +1,6 @@
 import torch
 import torchvision.datasets as datasets
-from defineNetwork import Net, transform
+from defineNetwork import Net, TRANSFORM, BATCH_SIZE, NUM_WORKERS
 
 def testingNetwork( testloader, net):
     correct = 0
@@ -16,10 +16,10 @@ def testingNetwork( testloader, net):
 
 if __name__ == "__main__":
     print("starting testing . . . ")
-    testset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=2)
+    testset = datasets.CIFAR10(root='./data', train=False, download=True, transform=TRANSFORM)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
 
     # Code to initialize testloader and net
     net = Net()
     net.load_state_dict(torch.load('./Results/cifar10_trained_model.pth'))
-    testingNetwork(testloader, net)
+    print(testingNetwork(testloader, net))

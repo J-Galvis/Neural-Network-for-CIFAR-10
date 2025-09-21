@@ -88,12 +88,6 @@ def start_server():
     os.makedirs(results_dir, exist_ok=True)
     
     server_time_file = os.path.join(results_dir, 'Server time.csv')
-    net_time_file = os.path.join(results_dir, 'net_Times.csv')
-    
-    # Initialize Server time CSV
-    with open(server_time_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Epoch', 'Total_Epoch_Time', 'Active_Workers'])
     
     # Get the total number of batches
     total_batches = len(TRAINLOADER)
@@ -165,7 +159,6 @@ def start_server():
             print("All workers disconnected. Stopping training...")
             break
         
-        # Wait for all workers to finish their batches and send accumulated gradients
         print(f"Waiting for accumulated gradients from {len(active_workers)} workers...")
         successful_gradients = []
         workers_to_remove = []
@@ -220,29 +213,21 @@ def start_server():
                     active_workers.pop(i)
         
         # Calculate total epoch time
-        epoch_end_time = time.time()
-        total_epoch_time = epoch_end_time - epoch_start_time
+        total_epoch_time = time.time() - epoch_start_time
+        epoch_training_total = time.time() - net_training_start
+
+        Accuracy = accuracyTest(net, TRANSFORM, num_workers)
         
         # Log server epoch time
         with open(server_time_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch+1, f"{total_epoch_time:.4f}", len(active_workers)])
+            writer.writerow([epoch+1, f"{total_epoch_time:.4f}",  f"{epoch_training_total:.4f}", len(active_workers), f"{Accuracy:.4f}"])
         
         if not active_workers:
             print("No active workers remaining. Stopping training...")
             break
             
         print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
-
-    # Calculate total net training time
-    net_training_total = time.time() - net_training_start
-
-    Accuracy = accuracyTest(net, TRANSFORM, num_workers)
-
-    # Log net training time
-    with open(net_time_file, 'a', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([NUM_EPOCHS, f"{net_training_total:.4f}", f"{Accuracy:.2f}"])
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
