@@ -6,13 +6,13 @@ import torch
 
 from defineNetwork import Net, TRAINLOADER
 
-HOST = 'localhost'
+HOST = '192.168.0.137'
 PORT = 6000
 
 def receive_data(sock):
     """Receive data with length prefix"""
     try:
-        sock.settimeout(60.0)  # Longer timeout for epoch processing
+        sock.settimeout(120.0)  # Longer timeout for epoch processing
         length_bytes = b''
         while len(length_bytes) < 4:
             chunk = sock.recv(4 - len(length_bytes))

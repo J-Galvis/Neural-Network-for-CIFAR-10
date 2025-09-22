@@ -9,10 +9,10 @@ import time
 import csv
 import os
 
-HOST = 'localhost' 
+HOST = '192.168.0.137' 
 PORT = 6000
 
-NUM_WORKERS=2
+NUM_WORKERS=3
 NUM_EPOCHS=60
 BATCH_SIZE=32
 
