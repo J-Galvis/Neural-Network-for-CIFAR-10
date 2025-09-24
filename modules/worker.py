@@ -4,10 +4,7 @@ import socket
 import pickle
 import torch
 
-from defineNetwork import Net, TRAINLOADER
-
-HOST = '192.168.0.137'
-PORT = 6000
+from defineNetwork import Net, TRAINLOADER, HOST, PORT
 
 def receive_data(sock):
     """Receive data with length prefix"""

@@ -31,13 +31,13 @@ class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         
-        # First convolutional block - wider
+        # First convolutional block
         self.conv1 = nn.Conv2d(3, 64, 3, padding=1, bias=False)    
         self.bn1 = nn.BatchNorm2d(64)
         self.conv2 = nn.Conv2d(64, 64, 3, padding=1, bias=False)   
         self.bn2 = nn.BatchNorm2d(64)
         self.pool1 = nn.MaxPool2d(2, 2)
-        self.dropout1 = nn.Dropout2d(0.25)  # Spatial dropout
+        self.dropout1 = nn.Dropout2d(0.25)
         
         # Second convolutional block
         self.conv3 = nn.Conv2d(64, 128, 3, padding=1, bias=False)   

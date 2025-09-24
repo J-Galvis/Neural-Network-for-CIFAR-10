@@ -15,3 +15,10 @@ docker run --user root -v $(pwd):/app neural_network:latest python modules/defin
 ```
 docker run --user root neural_network python module/testing.py
 ```
+
+##deploymetn in linux
+
+```
+sudo apt install python3 python3-pip -y
+sudo apt install git 
+```
