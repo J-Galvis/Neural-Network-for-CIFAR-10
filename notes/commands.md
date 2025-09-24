@@ -19,6 +19,6 @@ docker run --user root neural_network python module/testing.py
 ##deploymetn in linux
 
 ```
-sudo apt install python3 python3-pip -y
+sudo apt install python3 python3-pip python3-venv -y
 sudo apt install git 
 ```

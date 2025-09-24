@@ -6,6 +6,8 @@ import torch
 
 from defineNetwork import Net, TRAINLOADER, HOST, PORT
 
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 def receive_data(sock):
     """Receive data with length prefix"""
     try:
