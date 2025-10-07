@@ -9,7 +9,7 @@ import time
 import csv
 import os
 
-HOST = '192.168.0.137' 
+HOST = 'localhost' 
 PORT = 6000
 
 NUM_WORKERS=2
