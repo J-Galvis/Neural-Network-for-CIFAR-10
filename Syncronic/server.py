@@ -173,6 +173,7 @@ def start_server():
                 workers_to_remove.append(i)
                 ws.close()
         
+        
         # Remove workers that failed to send gradients
         for i in reversed(workers_to_remove):
             active_workers.pop(i)

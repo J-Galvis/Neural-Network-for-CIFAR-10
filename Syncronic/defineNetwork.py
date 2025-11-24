@@ -9,7 +9,7 @@ import time
 import csv
 import os
 
-HOST = 'localhost' 
+HOST = 'localhost'
 PORT = 6000
 
 NUM_WORKERS=2
@@ -49,7 +49,7 @@ class Net(nn.Module):
         
         # Third convolutional block
         self.conv5 = nn.Conv2d(128, 256, 3, padding=1, bias=False)  
-        self.bn5 = nn.BatchNorm2d(256)
+        self.bn5 = nn.BatchNorm2d( 256)
         self.conv6 = nn.Conv2d(256, 256, 3, padding=1, bias=False)
         self.bn6 = nn.BatchNorm2d(256)
         self.pool3 = nn.MaxPool2d(2, 2)
