@@ -9,19 +9,40 @@ import time
 import csv
 import os
 
-from defineNetwork import Net, TRANSFORM, NUM_WORKERS, NUM_EPOCHS, SAVE_FILE, TRAINLOADER, PORT, HOST
+from defineNetwork import Net, TRANSFORM, NUM_WORKERS, NUM_EPOCHS, SAVE_FILE, TRAINLOADER, PORT, HOST, ImageNetDataset, load_dataset
 
-def testingNetwork( testloader, net):
+def testingNetwork(testloader, net):
+    """Test network accuracy on validation set"""
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    net.to(device)
+    net.eval()
+    
     correct = 0
     total = 0
+    top5_correct = 0  # Track top-5 accuracy for ImageNet
+    
     with torch.no_grad():
-        for data in testloader:
-            images, labels = data
+        for batch_idx, (images, labels) in enumerate(testloader):
+            images, labels = images.to(device), labels.to(device)
             outputs = net(images)
+            
+            # Top-1 accuracy
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
-    return (100 * correct / total)
+            
+            # Top-5 accuracy for ImageNet
+            _, top5_pred = outputs.topk(5, 1, True, True)
+            top5_correct += top5_pred.eq(labels.view(-1, 1).expand_as(top5_pred)).sum().item()
+            
+            # Progress logging for large validation set
+            if batch_idx % 50 == 0:
+                print(f"Validation batch {batch_idx+1}/{len(testloader)}")
+    
+    top1_acc = 100 * correct / total
+    top5_acc = 100 * top5_correct / total
+    print(f"Top-1 Accuracy: {top1_acc:.2f}%, Top-5 Accuracy: {top5_acc:.2f}%")
+    return top1_acc, top5_acc
 
 def send_model_params(sock, model):
     """Send current model parameters to worker (parameters only)"""
@@ -60,15 +81,23 @@ def receive_gradients(sock):
         return None
 
 def accuracyTest(net, transform, num_workers):
-    print("starting testing . . . ")
-    testset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=False, num_workers=num_workers)
+    """Test accuracy on ImageNet validation set"""
+    print("Starting ImageNet validation testing...")
+    # Load ImageNet validation set
+    # Login using e.g. `huggingface-cli login` to access this dataset
+    ds = load_dataset("ILSVRC/imagenet-1k")
+    testset = ImageNetDataset(ds["validation"], transform=transform)
+    testloader = torch.utils.data.DataLoader(testset, batch_size=8, shuffle=False, 
+                                            num_workers=0, pin_memory=False)
+    
     return testingNetwork(testloader, net)
 
 def start_server():
     num_workers = NUM_WORKERS
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Server using device: {device}")
 
-    net = Net()
+    net = Net().to(device)
 
     optimizer = optim.AdamW(net.parameters(), lr=0.001, weight_decay=1e-2, 
                            betas=(0.9, 0.999), eps=1e-8)
@@ -88,6 +117,13 @@ def start_server():
     os.makedirs(results_dir, exist_ok=True)
     
     server_time_file = os.path.join(results_dir, 'Server time.csv')
+    
+    # Write CSV header if file doesn't exist
+    if not os.path.exists(server_time_file):
+        with open(server_time_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['Epoch', 'Epoch_Time_Seconds', 'Total_Training_Time_Seconds', 
+                           'Active_Workers', 'Top1_Accuracy', 'Top5_Accuracy'])
     
     # Get the total number of batches
     total_batches = len(TRAINLOADER)
@@ -198,7 +234,8 @@ def start_server():
             optimizer.step()
             scheduler.step()
             
-            print(f"Model updated after epoch {epoch+1} using {num_workers} workers")
+            print(f"ImageNet model updated after epoch {epoch+1} using {num_workers} workers")
+            print(f"Average learning rate: {scheduler.get_last_lr()[0]:.6f}")
             
             # Send updated parameters to remaining workers for next epoch
             if epoch < NUM_EPOCHS - 1:  # Don't send if this is the last epoch
@@ -217,18 +254,25 @@ def start_server():
         total_epoch_time = time.time() - epoch_start_time
         epoch_training_total = time.time() - net_training_start
 
-        Accuracy = accuracyTest(net, TRANSFORM, num_workers)
+        # Run accuracy test (returns top-1 and top-5 for ImageNet)
+        top1_acc, top5_acc = accuracyTest(net, TRANSFORM, num_workers)
         
-        # Log server epoch time
+        # Log server epoch time with both accuracy metrics
         with open(server_time_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch+1, f"{total_epoch_time:.4f}",  f"{epoch_training_total:.4f}", len(active_workers), f"{Accuracy:.4f}"])
+            writer.writerow([epoch+1, f"{total_epoch_time:.4f}", f"{epoch_training_total:.4f}", 
+                           len(active_workers), f"{top1_acc:.4f}", f"{top5_acc:.4f}"])
         
         if not active_workers:
             print("No active workers remaining. Stopping training...")
             break
+        
+        # Clear GPU cache after each epoch for ImageNet
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
             
-        print(f'Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
+        print(f'ImageNet Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
+        print(f'Top-1 Accuracy: {top1_acc:.2f}%, Top-5 Accuracy: {top5_acc:.2f}%')
 
     # Send termination signal to remaining workers
     print("Sending termination signals to remaining workers...")
@@ -239,9 +283,12 @@ def start_server():
             pass
         ws.close()
 
+    # Save the trained ImageNet model
     torch.save(net.state_dict(), SAVE_FILE)
+    print(f"ImageNet trained model saved to: {SAVE_FILE}")
+    
     server_socket.close()
-    print("Server stopped")
+    print("ImageNet training server stopped")
 
 if __name__ == '__main__':
     start_server()

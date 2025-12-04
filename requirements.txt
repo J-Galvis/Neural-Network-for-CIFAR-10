@@ -1,4 +1,10 @@
-# To ensure app dependencies are ported from your virtual environment/host machine into your container, run 'pip freeze > requirements.txt' in the terminal to overwrite this file
-torch
-torchvision
-datasets
+# Dependencies for ImageNet Neural Network Training
+torch>=2.0.0
+torchvision>=0.15.0
+datasets>=2.0.0
+huggingface_hub>=0.15.0
+Pillow>=9.0.0
+numpy>=1.21.0
+transformers>=4.21.0
+accelerate>=0.20.0
+requests>=2.25.0

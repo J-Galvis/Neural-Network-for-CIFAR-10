@@ -66,12 +66,14 @@ def accumulate_gradients(accumulated_grads, current_grads):
 def start_worker():
 
     # Initialize model and criterion (no optimizer/scheduler - workers only compute gradients)
-    net = Net()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    net = Net().to(device)
     criterion = nn.CrossEntropyLoss()
 
     # Prepare batches list to access by index
+    print("Loading ImageNet batches for worker...")
     batches = list(TRAINLOADER)
-    print(f"Worker loaded {len(batches)} batches locally")
+    print(f"Worker loaded {len(batches)} batches locally (ImageNet dataset)")
 
     # Connect to server
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -79,8 +81,6 @@ def start_worker():
     print("Connected to server")
 
     scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    net.to(device)
     
     # Create a dummy optimizer for scaler.unscale_ (required for AMP)
     if scaler is not None:
@@ -141,6 +141,10 @@ def start_worker():
                             print(f"Warning: batch_id {batch_id} exceeds available batches ({len(batches)})")
                             continue
                             
+                        # Progress logging for large ImageNet dataset
+                        if batch_idx % 100 == 0:
+                            print(f"Processing batch {batch_idx+1}/{len(batch_ids)} (ID: {batch_id})")
+                            
                         inputs, labels = batches[batch_id]
                         inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
@@ -177,6 +181,10 @@ def start_worker():
                         
                         # Accumulate gradients
                         accumulated_grads = accumulate_gradients(accumulated_grads, current_grads)
+                        
+                        # Clear cache periodically for ImageNet memory management
+                        if torch.cuda.is_available() and batch_idx % 50 == 0:
+                            torch.cuda.empty_cache()
 
                     print(f"Epoch {epoch_count} completed. Avg loss: {total_loss/len(batch_ids):.4f}")
                     

@@ -3,6 +3,8 @@ import torchvision.datasets as datasets
 import torch.nn.functional as F
 import torch.optim as optim
 import torch.nn as nn
+from datasets import load_dataset
+from PIL import Image
 import platform
 import torch
 import time
@@ -12,20 +14,51 @@ import os
 HOST = 'localhost'
 PORT = 6000
 
-NUM_WORKERS=2
+NUM_WORKERS=0  # Disabled for ImageNet to avoid memory issues
 NUM_EPOCHS=60
-BATCH_SIZE=32
+BATCH_SIZE=8   # Further reduced for ImageNet memory constraints
 
-SAVE_FILE = './Results/cifar10_trained_model.pth'
+SAVE_FILE = './Results/imagenet_trained_model.pth'
 
+
+# ImageNet standard preprocessing
 TRANSFORM = transforms.Compose([
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
-    transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-TRAINSET = datasets.CIFAR10(root='./data', train=True, download=True, transform=TRANSFORM)
+# Custom dataset class for HuggingFace ImageNet
+class ImageNetDataset(torch.utils.data.Dataset):
+    def __init__(self, hf_dataset, transform=None):
+        self.dataset = hf_dataset
+        self.transform = transform
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        item = self.dataset[idx]
+        image = item['image']
+        label = item['label']
+        
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        if self.transform:
+            image = self.transform(image)
+        
+        return image, label
 
-TRAINLOADER = torch.utils.data.DataLoader(TRAINSET, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=torch.cuda.is_available(), persistent_workers=(NUM_WORKERS > 0))
+# Load ImageNet dataset from HuggingFace
+# Login using e.g. `huggingface-cli login` to access this dataset
+print("Loading ImageNet dataset from HuggingFace...")
+ds = load_dataset("ILSVRC/imagenet-1k")
+TRAINSET = ImageNetDataset(ds["train"], transform=TRANSFORM)
+print(f"Successfully loaded ImageNet training set with {len(TRAINSET)} samples")
+
+TRAINLOADER = torch.utils.data.DataLoader(TRAINSET, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=False, persistent_workers=False)
 
 class Net(nn.Module):
     def __init__(self):
@@ -64,8 +97,8 @@ class Net(nn.Module):
         # Global Average Pooling
         self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
         
-        # Classifier
-        self.fc = nn.Linear(512, 10)
+        # Classifier for ImageNet (1000 classes)
+        self.fc = nn.Linear(512, 1000)
         self.dropout = nn.Dropout(0.5)
         
         # Initialize weights
@@ -121,13 +154,22 @@ def trainNet(num_epochs: int):
 
     torch.set_num_threads(num_workers if num_workers > 0 else 1)
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    # ImageNet preprocessing with data augmentation for training
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.RandomCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
 
-    trainset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+    print("Loading ImageNet training dataset...")
+    # Login using e.g. `huggingface-cli login` to access this dataset
+    ds = load_dataset("ILSVRC/imagenet-1k")
+    trainset = ImageNetDataset(ds["train"], transform=transform)
+    print(f"Successfully loaded ImageNet training set with {len(trainset)} samples")
 
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=32, shuffle=True, num_workers=num_workers, pin_memory=torch.cuda.is_available(), persistent_workers=(num_workers > 0))
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=8, shuffle=True, num_workers=0, pin_memory=False, persistent_workers=False)
 
     net = Net()
     criterion = nn.CrossEntropyLoss()
@@ -226,7 +268,7 @@ def trainNet(num_epochs: int):
         writer.writerow([len(epoch_times), round(total_duration, 2)])
    
     print('Times saved to epoch_times.csv and total_training_time.csv')
-    torch.save(net.state_dict(), './Results/cifar10_trained_model.pth') #This saves the trained model
+    torch.save(net.state_dict(), './Results/imagenet_trained_model.pth') #This saves the trained model
 
 
 if __name__ == "__main__":
