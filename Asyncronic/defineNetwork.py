@@ -14,7 +14,7 @@ import os
 HOST = 'localhost'
 PORT = 6000
 
-NUM_WORKERS=0  # Disabled for ImageNet to avoid memory issues
+NUM_WORKERS=1  # Set to 1 for distributed training
 NUM_EPOCHS=60
 BATCH_SIZE=8   # Further reduced for ImageNet memory constraints
 

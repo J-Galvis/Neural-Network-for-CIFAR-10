@@ -8,6 +8,7 @@ import torch
 import time
 import csv
 import os
+import gc
 
 from defineNetwork import Net, TRANSFORM, NUM_WORKERS, NUM_EPOCHS, SAVE_FILE, TRAINLOADER, PORT, HOST, ImageNetDataset, load_dataset
 
@@ -234,8 +235,22 @@ def start_server():
             optimizer.step()
             scheduler.step()
             
+            # Cleanup gradients from memory
+            del successful_gradients
+            
             print(f"ImageNet model updated after epoch {epoch+1} using {num_workers} workers")
             print(f"Average learning rate: {scheduler.get_last_lr()[0]:.6f}")
+            
+            # Save checkpoint every 5 epochs
+            if (epoch + 1) % 5 == 0:
+                checkpoint_path = f'./Results/checkpoint_epoch_{epoch+1}.pth'
+                torch.save({
+                    'epoch': epoch + 1,
+                    'model_state_dict': net.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                }, checkpoint_path)
+                print(f"Checkpoint saved: {checkpoint_path}")
             
             # Send updated parameters to remaining workers for next epoch
             if epoch < NUM_EPOCHS - 1:  # Don't send if this is the last epoch
@@ -267,9 +282,11 @@ def start_server():
             print("No active workers remaining. Stopping training...")
             break
         
-        # Clear GPU cache after each epoch for ImageNet
+        # Aggressive memory cleanup after each epoch
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        import gc
+        gc.collect()
             
         print(f'ImageNet Epoch {epoch+1} finished with {len(active_workers)} active workers (Time: {total_epoch_time:.4f}s)')
         print(f'Top-1 Accuracy: {top1_acc:.2f}%, Top-5 Accuracy: {top5_acc:.2f}%')

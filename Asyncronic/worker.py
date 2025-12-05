@@ -70,10 +70,9 @@ def start_worker():
     net = Net().to(device)
     criterion = nn.CrossEntropyLoss()
 
-    # Prepare batches list to access by index
-    print("Loading ImageNet batches for worker...")
-    batches = list(TRAINLOADER)
-    print(f"Worker loaded {len(batches)} batches locally (ImageNet dataset)")
+    # Use TRAINLOADER directly instead of preloading all batches
+    print("Setting up ImageNet data loader for worker...")
+    print(f"Worker configured for {len(TRAINLOADER)} batches (ImageNet dataset)")
 
     # Connect to server
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -137,15 +136,22 @@ def start_worker():
                     
                     # Process all batches for this epoch (gradient computation only)
                     for batch_idx, batch_id in enumerate(batch_ids):
-                        if batch_id >= len(batches):
-                            print(f"Warning: batch_id {batch_id} exceeds available batches ({len(batches)})")
+                        if batch_id >= len(TRAINLOADER):
+                            print(f"Warning: batch_id {batch_id} exceeds available batches ({len(TRAINLOADER)})")
                             continue
                             
                         # Progress logging for large ImageNet dataset
                         if batch_idx % 100 == 0:
                             print(f"Processing batch {batch_idx+1}/{len(batch_ids)} (ID: {batch_id})")
                             
-                        inputs, labels = batches[batch_id]
+                        # Get batch from DataLoader iterator
+                        batch_iter = iter(TRAINLOADER)
+                        for _ in range(batch_id + 1):
+                            try:
+                                inputs, labels = next(batch_iter)
+                            except StopIteration:
+                                break
+                        del batch_iter
                         inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
                         # Zero gradients for this batch
@@ -182,9 +188,15 @@ def start_worker():
                         # Accumulate gradients
                         accumulated_grads = accumulate_gradients(accumulated_grads, current_grads)
                         
-                        # Clear cache periodically for ImageNet memory management
-                        if torch.cuda.is_available() and batch_idx % 50 == 0:
-                            torch.cuda.empty_cache()
+                        # Aggressive memory cleanup
+                        del current_grads, inputs, labels, outputs, loss
+                        
+                        # Clear cache frequently for ImageNet memory management
+                        if batch_idx % 10 == 0:  # More frequent cleanup
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                            import gc
+                            gc.collect()
 
                     print(f"Epoch {epoch_count} completed. Avg loss: {total_loss/len(batch_ids):.4f}")
                     
